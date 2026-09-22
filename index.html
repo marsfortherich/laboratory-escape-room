@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Power Lab Escape</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="A 3D browser escape room about 3-phase microgrids, hydrogen, hacking and energy trading.">
+  <meta name="theme-color" content="#0b0f14">
+  <meta property="og:title" content="Power Lab Escape">
+  <meta property="og:description" content="Power up a 3-phase island grid, hack the control PC, out-trade the market and synchronise with the grid to escape.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/style.css?v=8f8b46e019">
+  <!-- Only used in dev mode (index.html?dev — needs `npm install` and a local server): raw ES modules. -->
+  <script type="importmap">
+  { "imports": { "three": "./node_modules/three/build/three.module.js" } }
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- In-game HUD -->
+  <div id="hud" class="hidden">
+    <div id="crosshair"></div>
+    <div id="prompt"></div>
+    <div id="timer"></div>
+    <div id="objective"></div>
+    <div id="busHud"></div>
+    <div id="inv"></div>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <div id="keys">E use · H hint · J journal <span id="jBadge">●</span> · Esc menu</div>
+  </div>
+
+  <!-- Start screen -->
+  <div id="start" class="overlay start-bg hidden"><div class="card title-card" id="startCard"></div></div>
+
+  <!-- Small "click to resume" pill (pointer lock needs a user gesture) -->
+  <button id="resume" class="hidden">▶ Click to play</button>
+
+  <!-- Pause menu + settings -->
+  <div id="menu" class="overlay hidden">
+    <div class="card menu-card">
+      <div class="panel-head"><h2>Menu</h2><button class="btn close" data-menu="resume" aria-label="Close">✕</button></div>
+      <div class="menu-actions">
+        <button class="btn big" data-menu="resume">▶ Resume</button>
+        <button class="btn" data-menu="hint">💡 Hint</button>
+        <button class="btn" data-menu="journal">📓 Journal</button>
+        <button class="btn" data-menu="title">Save &amp; quit to title</button>
+        <button class="btn danger" data-menu="restart">Restart room</button>
+      </div>
+      <h3>Settings</h3>
+      <div class="settings-wrap"></div>
+    </div>
+  </div>
+
+  <!-- Device / prop panel -->
+  <div id="panel" class="overlay side hidden">
+    <div class="panel-box">
+      <div class="panel-head"><h2 id="panelTitle"></h2><button class="btn close" data-close aria-label="Close">✕</button></div>
+      <div id="panelBody"></div>
+      <p class="note panel-foot">E / Esc to close</p>
+    </div>
+  </div>
+
+  <!-- Hints -->
+  <div id="hintBox" class="overlay hidden">
+    <div class="card hint-card">
+      <div class="panel-head"><h2>💡 Hint</h2><button class="btn close" data-close aria-label="Close">✕</button></div>
+      <div class="hint-body"></div>
+    </div>
+  </div>
+
+  <!-- Journal -->
+  <div id="journal" class="overlay hidden">
+    <div class="card journal-card">
+      <div class="panel-head"><h2>📓 Journal</h2><button class="btn close" data-close aria-label="Close">✕</button></div>
+      <div class="journal-body"></div>
+    </div>
+  </div>
+
+  <!-- Terminal -->
+  <div id="terminal" class="overlay hidden">
+    <div class="crt">
+      <div class="crt-head"><span>labctl-01 — secure shell</span><button class="btn close" data-close aria-label="Close">✕</button></div>
+      <div id="termOut" class="term-out"></div>
+      <div class="term-line"><span id="termPrompt"></span><input id="termIn" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="terminal input"></div>
+      <div class="term-quick">
+        <button class="btn" data-cmd="help">help</button><button class="btn" data-cmd="ls -a">ls -a</button>
+        <button class="btn" data-cmd="cat ">cat …</button><button class="btn" data-cmd="cd ">cd …</button>
+        <button class="btn" data-cmd="su ">su …</button><button class="btn" data-cmd="mail">mail</button>
+        <button class="btn" data-cmd="hint">💡 hint</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Grid dispatch game -->
+  <div id="grid" class="overlay hidden"></div>
+
+  <!-- Ending -->
+  <div id="end" class="overlay hidden"><div class="card title-card" id="endCard"></div></div>
+
+  <noscript><div class="overlay"><div class="card">This game needs JavaScript and WebGL.</div></div></noscript>
+  <script>
+    // Default: the pre-built classic-script bundle (works on GitHub Pages AND when index.html is opened from disk).
+    // ?dev: load the ES-module sources directly (edit & reload without rebuilding).
+    (function () {
+      var s = document.createElement('script');
+      if (/[?&]dev(=|&|$)/.test(location.search)) { s.type = 'module'; s.src = 'js/main.js'; }
+      else s.src = 'dist/game.js?v=8f8b46e019';
+      s.onerror = function () { document.body.insertAdjacentHTML('beforeend', '<div class="overlay"><div class="card">Could not load ' + s.src + '. Run <code>npm run build</code>.</div></div>'); };
+      document.body.appendChild(s);
+    })();
+  </script>
+</body>
+</html>
