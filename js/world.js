@@ -179,7 +179,7 @@ export function buildWorld(scene, P) {
     const g = new THREE.Group(); g.position.set(-4.95, 1.05, zc); g.rotation.z = -0.5;
     box(1.75, 0.05, 1.15, M.alu, 0, 0, 0, g);
     plane(1.68, 1.08, pvCell, 0, 0.03, 0, '+y', g);
-    scene.add(g); tag(g, 'pv', 'CPV test modules');
+    scene.add(g); tag(g, 'pv', 'III-V PV test modules');
   }
   box(1.5, 0.06, 3.9, M.metal, -4.95, 0.62, 0);
   for (const zc of [-1.9, 1.9]) for (const xc of [-5.6, -4.3]) box(0.06, xc < -5 ? 1.35 : 0.62, 0.06, M.metal, xc, xc < -5 ? 0.67 : 0.31, zc);
@@ -208,7 +208,7 @@ export function buildWorld(scene, P) {
   box(0.06, 0.5, 0.36, M.dark, -5.97, 1.45, 2.85, kp);
   plane(0.34, 0.48, screenMat(refs.keypadTex, 0.35), -5.935, 1.45, 2.85, '+x', kp);
   scene.add(kp); tag(kp, 'sunsim', 'Sun-simulator keypad');
-  plane(0.8, 0.4, texMat(labelTex(['CPV TEST RIG', { t: 'Sun simulator · 2.4 suns', font: `30px ${FONT.sans}` }], { bg: '#1b3a6b', fg: '#fff' })), -5.99, 2.35, 0, '+x');
+  plane(0.8, 0.4, texMat(labelTex(['PV TEST RIG', { t: 'Sun simulator · 3 suns', font: `30px ${FONT.sans}` }], { bg: '#1b3a6b', fg: '#fff' })), -5.99, 2.35, 0, '+x');
 
   // ---------------------------------------------------------------- Battery cabinets (right wall)
   const batFront = canvasTex(256, 420, (ctx, w, h) => {
@@ -524,7 +524,7 @@ export function buildWorld(scene, P) {
     ctx.fillStyle = '#f7f3e3'; ctx.fillRect(0, 0, w, h);
     ctx.fillStyle = '#1b3f8f'; ctx.font = `bold 22px ${FONT.sans}`; ctx.fillText('SYNC CHECKLIST', 16, 34);
     ctx.font = `17px ${FONT.sans}`;
-    ['1. V island = V grid', '2. f island a hair ABOVE', '3. phase ro▒▒▒n: lamps', '    dark TOGETHER', '4. close at 12 o\'clock', '', '— M.V.'].forEach((t, i) => ctx.fillText(t, 16, 80 + i * 36));
+    ['0. permit card in', '1. V island = V grid ±2%', '2. f island a hair ABOVE', '3. phase ro▒▒▒n: lamps', '    dark TOGETHER', '4. close on scope at 12', '— M.V.'].forEach((t, i) => ctx.fillText(t, 16, 76 + i * 44));
     ctx.fillStyle = '#e8e0c8'; ctx.beginPath(); ctx.moveTo(w, h - 60); ctx.lineTo(w - 70, h); ctx.lineTo(w, h); ctx.fill();
   });
   const ck = new THREE.Group();

@@ -7,6 +7,7 @@ export const CFG = {
   ELZ_P: 200, ELZ_MIN: 20, ELZ_KWH_KG: 55,
   FC_P: 150, FC_MIN: 15, FC_KWH_KG: 18,
   H2_MAX: 150,                       // kg
+  H2_GREY: 2, RFNBO_MAX: 20,         // €/kg for non-renewable H₂; grid hours ≤ 20 €/MWh count as renewable (EU RFNBO, simplified)
   LIM: 300,                          // kW grid connection (import & export)
   FEE: 40,                           // €/MWh grid fees on imports
   SOC0: 0.5, H2_0: 20,
@@ -28,7 +29,7 @@ const KINDS = [
   { name: 'Cloudy morning, clearing in the afternoon', base: 0.6, trend: -0.55, bump: 0 },
   { name: 'Bright morning, thunderstorms later', base: 0.3, trend: 0.65, bump: 0 },
   { name: 'Clear skies — solar flood on the market', base: 0.05, trend: 0, bump: 0 },
-  { name: 'Overcast, windless evening', base: 0.8, trend: 0.1, bump: 0 },
+  { name: 'Overcast, windless evening', base: 0.95, trend: 0.05, bump: 0 },
 ];
 
 export function makeDay(seed, kindIdx) {
@@ -63,6 +64,17 @@ export function makeDay(seed, kindIdx) {
 // ------------------------------------------------------------ physics / economics of one hour
 const money = (net, price) => (net >= 0 ? net * price : net * (price + CFG.FEE)) / 1000;
 const minLoad = (v, min) => (v > 0 && v < min ? min : v);
+/** H₂ made from grid power outside renewable hours only fetches the grey price: returns the € lost vs. the day's H₂ price. */
+export function greyPenalty(day, elz, pv, load, price) {
+  if (elz <= 0 || day.h2Price <= CFG.H2_GREY) return 0;
+  const green = price <= CFG.RFNBO_MAX ? elz : Math.min(elz, Math.max(0, pv - load));
+  return (elz - green) / CFG.ELZ_KWH_KG * (day.h2Price - CFG.H2_GREY);
+}
+/** Break-even prices (€/MWh) for today's H₂ value. */
+export function breakEvens(day) {
+  const elzEx = day.h2Price / CFG.ELZ_KWH_KG * 1000, fcEx = day.h2Price / CFG.FC_KWH_KG * 1000;
+  return { elzEx, fcEx, fcIm: fcEx - CFG.FEE };
+}
 
 export function simHour(day, h, st, set, forecast = false) {
   const pvRaw = forecast ? day.pvF[h] : day.pvA[h];
@@ -95,10 +107,12 @@ export function simHour(day, h, st, set, forecast = false) {
     notes.push(`export limit (${lost.toFixed(0)} kW PV lost)`);
   }
   const wear = Math.max(0, bat) * CFG.BAT_WEAR / 1000;
-  const eur = money(net, price) - wear;
+  const grey = greyPenalty(day, elz, pv, load, price);
+  if (grey > 0.5) notes.push(`grey H₂ −€${grey.toFixed(0)}`);
+  const eur = money(net, price) - wear - grey;
   const Eafter = bat > 0 ? E - bat / CFG.BAT_EFF : E - bat * CFG.BAT_EFF;
   return {
-    h, price, pvRaw, pv, load, bat, elz, fc, net, eur, wear, notes,
+    h, price, pvRaw, pv, load, bat, elz, fc, net, eur, wear, grey, notes,
     soc: Eafter / CFG.BAT_E,
     h2: st.h2 + elz / CFG.ELZ_KWH_KG - fc / CFG.FC_KWH_KG,
   };
@@ -106,9 +120,9 @@ export function simHour(day, h, st, set, forecast = false) {
 
 const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
 
-/** Result = cash + stored-energy change. Battery energy is valued at the (known) average forecast price after discharge losses. */
+/** Result = cash + stored-energy change. Battery energy is valued at the (known) average forecast price after discharge losses and wear. */
 export function score(day, cash, st) {
-  const batV = (st.soc - CFG.SOC0) * CFG.BAT_E * CFG.BAT_EFF * avg(day.priceF) / 1000;
+  const batV = (st.soc - CFG.SOC0) * CFG.BAT_E * CFG.BAT_EFF * (avg(day.priceF) - CFG.BAT_WEAR) / 1000;
   const h2V = (st.h2 - CFG.H2_0) * day.h2Price;
   return { cash, batV, h2V, total: cash + batV + h2V };
 }
@@ -141,14 +155,15 @@ export function benchmark(day, data = { pv: day.pvA, price: day.priceA }) {
         let net = data.pv[h] * (1 - c / 100) + fc + b - day.load[h] - elz;
         if (net < -CFG.LIM) continue;
         if (net > CFG.LIM) net = CFG.LIM;
-        const v = money(net, data.price[h]) - Math.max(0, b) * CFG.BAT_WEAR / 1000 + (elz / CFG.ELZ_KWH_KG - fc / CFG.FC_KWH_KG) * day.h2Price;
+        const v = money(net, data.price[h]) - Math.max(0, b) * CFG.BAT_WEAR / 1000 + (elz / CFG.ELZ_KWH_KG - fc / CFG.FC_KWH_KG) * day.h2Price
+          - greyPenalty(day, elz, data.pv[h] * (1 - c / 100), day.load[h], data.price[h]);
         if (v > best) { best = v; bestA = { elz, fc, curt: c }; }
       }
       inner[h][d] = best; arg[h][d] = bestA;
     }
   }
   const pol = [];
-  let V = Array.from({ length: N }, (_, i) => (Emin + i * step - CFG.SOC0 * CFG.BAT_E) * CFG.BAT_EFF * ap / 1000);
+  let V = Array.from({ length: N }, (_, i) => (Emin + i * step - CFG.SOC0 * CFG.BAT_E) * CFG.BAT_EFF * (ap - CFG.BAT_WEAR) / 1000);
   for (let h = 23; h >= 0; h--) {
     const nv = new Array(N).fill(-Infinity); pol[h] = new Array(N).fill(0);
     for (let i = 0; i < N; i++) for (let d = -maxDis; d <= maxCh; d++) {
@@ -177,7 +192,7 @@ const wx = (h, c) => (clearSky(h) === 0 ? '🌙' : c < 0.2 ? '☀️' : c < 0.45
 const bestKey = 'ple-grid-best';
 
 export class GridGame {
-  constructor(onWin) {
+  constructor(onWin, roomSeed = 0) {
     this.el = document.getElementById('grid');
     this.onWin = onWin;
     this.onClose = null;
@@ -185,7 +200,7 @@ export class GridGame {
     this.dayNo = 0;
     this.built = false;
     this.permit = false;
-    this.newDay(2026, 0);
+    this.newDay(roomSeed || 2026, roomSeed ? undefined : 0);   // daily rooms get their own trading day
   }
 
   newDay(seed, kindIdx) {
@@ -202,6 +217,7 @@ export class GridGame {
     this.set = { bat: 0, elz: 0, fc: 0, curt: 0 };
     this.finished = false;
     this.advisorHour = -1;
+    this.advisorUsed = false;
   }
 
   serialize() { return { seed: this.seed, dayNo: this.dayNo, log: this.log, st: this.st, h: this.h, cash: this.cash, set: this.set, permit: this.permit }; }
@@ -272,6 +288,7 @@ export class GridGame {
         • Forecasts: <b>day-ahead</b> price and cloud cover. The <b>intraday</b> price and real clouds are revealed when the hour runs. Cloudier than forecast → less regional solar → higher price.<br>
         • Positive grid = export (paid the price). Import pays the price <b>+ €${CFG.FEE}/MWh grid fees</b>. Connection limit <b>±${CFG.LIM} kW</b> — surplus PV beyond it is lost.<br>
         • Negative prices happen: exporting then <b>costs</b> money. Curtail, charge, or run the electrolyzer.<br>
+        • Renewable-H₂ rule (EU RFNBO, simplified): hydrogen only fetches today's price if it is made from on-site PV surplus or in hours ≤ ${CFG.RFNBO_MAX} €/MWh; otherwise it sells as grey H₂ for €${CFG.H2_GREY}/kg.<br>
         • Battery: ${CFG.BAT_E} kWh, ±${CFG.BAT_P} kW, ${CFG.BAT_EFF * 100} % each way (90 % round trip), wear €${CFG.BAT_WEAR}/MWh discharged. Worth cycling when sell &gt; buy / 0.9 + wear.<br>
         • Electrolyzer ${CFG.ELZ_MIN}–${CFG.ELZ_P} kW, ${CFG.ELZ_KWH_KG} kWh/kg. Fuel cell ${CFG.FC_MIN}–${CFG.FC_P} kW, ${CFG.FC_KWH_KG} kWh/kg. H₂ value varies by day (header). Power→H₂→power ≈ 33 %.<br>
         • Result = cash + stored battery energy (after discharge losses, at the average day-ahead price) + H₂ change at today's H₂ price.<br>
@@ -284,18 +301,21 @@ export class GridGame {
     for (const k of ['bat', 'elz', 'fc', 'curt']) {
       $('s_' + k).addEventListener('input', (e) => { this.set[k] = Number(e.target.value); this.renderSide(); });
     }
-    $('gRun').addEventListener('click', () => this.runHour());
-    $('gRun3').addEventListener('click', () => { for (let i = 0; i < 3 && !this.finished; i++) this.runHour(); });
+    // blur after a click: a focused button would otherwise auto-repeat its own Enter activation
+    $('gRun').addEventListener('click', (e) => { e.currentTarget.blur(); this.runHour(); });
+    $('gRun3').addEventListener('click', (e) => { e.currentTarget.blur(); for (let i = 0; i < 3 && !this.finished; i++) this.runHour(); });
     $('gZero').addEventListener('click', () => { this.set = { bat: 0, elz: 0, fc: 0, curt: 0 }; this.renderSide(); });
     $('gClose').addEventListener('click', () => this.onClose?.());
     this.el.addEventListener('click', (e) => {
-      if (e.target.id === 'gAdvisor') { this.advisorHour = this.h; this.onHint?.(); this.renderSide(); }
+      if (e.target.id === 'gAdvisor') { this.advisorHour = this.h; this.onHint?.(!this.advisorUsed); this.advisorUsed = true; this.renderSide(); }
       if (e.target.id === 'gResult') this.showResult();
     });
     window.addEventListener('resize', () => { if (this.isOpen()) this.drawChart(); });
     document.addEventListener('keydown', (e) => {
       if (!this.isOpen() || this.modalOpen()) return;
-      if (e.key !== 'Enter' || e.repeat || performance.now() - this.openedAt < 500) return;
+      if (e.key !== 'Enter') return;
+      if (e.repeat) { e.preventDefault(); return; }       // a held Enter never fast-forwards the day (not even on a focused button)
+      if (performance.now() - this.openedAt < 500) return;
       if (e.target.tagName === 'BUTTON') return;          // a focused button handles its own Enter
       e.preventDefault(); this.runHour();
     });
@@ -359,7 +379,8 @@ export class GridGame {
       <span>Weather</span><span>${wx(h, d.cloudF[h])} ${(d.cloudF[h] * 100).toFixed(0)} % clouds</span>
       <span>PV</span><span>${d.pvF[h].toFixed(0)} kW</span>
       <span>Load</span><span>${d.load[h]} kW</span>
-      <span>Next 3 h price</span><span>${[1, 2, 3].map((i) => (h + i < 24 ? d.priceF[h + i].toFixed(0) : '—')).join(' / ')}</span>`;
+      <span>Next 3 h price</span><span>${[1, 2, 3].map((i) => (h + i < 24 ? d.priceF[h + i].toFixed(0) : '—')).join(' / ')}</span>
+      <span title="today's H₂ break-even prices">Break-evens</span><span>ELZ &lt; ${breakEvens(d).elzEx.toFixed(0)} · FC &gt; ${breakEvens(d).fcIm.toFixed(0)}</span>`;
     const r = simHour(d, h, this.st, this.set, true);
     $('gPrev').innerHTML = `Expected (forecast):<br>grid ${r.net >= 0 ? 'export' : 'import'} <b>${Math.abs(r.net).toFixed(0)} kW</b> → <b style="color:${r.eur >= 0 ? '#6dff9a' : '#ff6b77'}">${eur(r.eur)}</b>` +
       `<br>H₂ ${r.elz > 0 ? '+' + (r.elz / CFG.ELZ_KWH_KG).toFixed(2) : ''}${r.fc > 0 ? ' −' + (r.fc / CFG.FC_KWH_KG).toFixed(2) : ''}${r.elz || r.fc ? ' kg' : '±0'} (≈ ${eur((r.elz / CFG.ELZ_KWH_KG - r.fc / CFG.FC_KWH_KG) * d.h2Price)}) · SOC → ${(r.soc * 100).toFixed(0)} %` +
@@ -371,10 +392,9 @@ export class GridGame {
 
   tip(h) {
     const d = this.day, p = d.priceF[h], hp = d.h2Price;
-    const elzEx = hp / CFG.ELZ_KWH_KG * 1000, elzIm = elzEx - CFG.FEE;
-    const fcEx = hp / CFG.FC_KWH_KG * 1000, fcIm = fcEx - CFG.FEE;
+    const { elzEx, fcEx, fcIm } = breakEvens(d);
     const surplus = d.pvF[h] > d.load[h];
-    const be = `<br><span style="color:#6c8196">Break-evens today: electrolyzer below ${elzEx.toFixed(0)} €/MWh on surplus PV (below ${elzIm.toFixed(0)} when importing); fuel cell above ${fcIm.toFixed(0)} €/MWh when it avoids imports (above ${fcEx.toFixed(0)} when exporting).</span>`;
+    const be = `<br><span style="color:#6c8196">Break-evens today: electrolyzer below ${elzEx.toFixed(0)} €/MWh on surplus PV; from grid power only in renewable hours (≤ ${CFG.RFNBO_MAX} €/MWh), otherwise the H₂ is grey (€${CFG.H2_GREY}/kg). Fuel cell above ${fcIm.toFixed(0)} €/MWh when it avoids imports (above ${fcEx.toFixed(0)} when exporting).</span>`;
     if (p < 0) return `Negative price: every exported kWh costs money. Curtail PV, charge the battery, run the electrolyzer.${be}`;
     if (p > fcIm) return `High price: the fuel cell beats keeping H₂ worth €${hp}/kg — and discharge the battery.${be}`;
     if (surplus && p < elzEx) return `Surplus PV and a price below ${elzEx.toFixed(0)} €/MWh: turning PV into H₂ pays more than exporting.${be}`;

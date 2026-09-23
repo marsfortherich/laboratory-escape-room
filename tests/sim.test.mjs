@@ -1,7 +1,7 @@
 // Headless tests for the pure simulation modules (no browser needed): `npm test`
 import assert from 'node:assert/strict';
 import { LabSim, C } from '../js/labsim.js';
-import { makeDay, simHour, baseline, benchmark, score, CFG } from '../js/gridgame.js';
+import { makeDay, simHour, baseline, benchmark, score, greyPenalty, CFG } from '../js/gridgame.js';
 import { makePuzzle, solve, CIRCUITS } from '../js/puzzle.js';
 import { SyncSim } from '../js/sync.js';
 
@@ -86,6 +86,18 @@ test('energy is conserved: storage drains by delivered power (×360 time-lapse)'
   const kWh = (0.8 - sim.s.bat.soc) * C.BAT_KWH;
   assert.ok(Math.abs(kWh - C.AUX / C.BAT_EFF) < 0.01, `drew ${kWh.toFixed(3)} kWh for 0.2 kW·h`);
 });
+test('the door-motor start runs in real time and costs almost nothing', () => {
+  const sim = new LabSim(P);
+  Object.assign(sim.s.sun, { unlocked: true, on: true });
+  Object.assign(sim.s.h2, { level: 0.5, valve: true, wheel: true });
+  Object.assign(sim.s.fc, { running: true, rt: 10 });
+  sim.s.bat.soc = 0.5;
+  ['invpv:1', 'invpvph:0', 'invbat:1', 'batmode:discharge', 'invbatph:1', 'invfc:1', 'invfcph:2', 'door:open'].forEach((a) => sim.action(a));
+  run(sim, 6);
+  assert.equal(sim.s.door.state, 'open');
+  assert.ok(0.5 - sim.s.bat.soc < 0.01, `battery used ${(0.5 - sim.s.bat.soc).toFixed(3)}`);
+  assert.ok(0.5 - sim.s.h2.level < 0.01, `tank used ${(0.5 - sim.s.h2.level).toFixed(3)}`);
+});
 test('hydrogen round trip returns about a third', () => {
   const inKWh = C.ELZ_P, kg = inKWh / C.ELZ_KWH_KG, outKWh = kg * C.FC_KWH_KG;
   assert.ok(Math.abs(outKWh / inKWh - 0.327) < 0.01);
@@ -94,17 +106,21 @@ test('hydrogen round trip returns about a third', () => {
 console.log('Synchronisation');
 test('dark-lamp method: lamps dark together only with the right rotation', () => {
   const s = new SyncSim(P);
-  s.isl = { V: P.gridV, f: P.gridF, seq: 'CW' }; s.phi = 0;
+  assert.equal(s.swapped, true, 'the incomer starts with L2/L3 swapped');
+  s.isl = { V: P.gridV, f: P.gridF }; s.phi = 0;
+  assert.ok(s.lamps().some((l) => l > 0.5), 'swapped incomer → lamps chase');
+  s.swapped = false;
   assert.ok(s.lamps().every((l) => l < 0.01));
-  s.isl.seq = 'CCW';
-  assert.ok(s.lamps().some((l) => l > 0.5), 'wrong rotation → lamps chase');
+  s.phi = 20;
+  assert.ok(s.lamps().every((l) => l === 0), 'filament lamps still look dark at 20° — close on the scope');
 });
 test('closing rules', () => {
   const s = new SyncSim(P);
-  s.isl = { V: P.gridV, f: P.gridF + 0.04, seq: 'CW' }; s.phi = 5;
+  s.isl = { V: P.gridV, f: P.gridF + 0.04 }; s.swapped = false; s.phi = 5;
   assert.equal(s.check().ok, true);
-  s.phi = 60; assert.equal(s.check().ok, false);
-  s.phi = 0; s.isl.seq = 'CCW'; assert.equal(s.check().ok, false);
+  s.phi = 12; assert.equal(s.check().ok, false, '±10° like the checklist');
+  s.phi = 0; s.isl.V = P.gridV + 5; assert.equal(s.check().ok, false, '±2 % like the checklist');
+  s.isl.V = P.gridV; s.swapped = true; assert.equal(s.check().ok, false);
 });
 
 console.log('Grid dispatch');
@@ -114,6 +130,12 @@ test('energy balance and storage bookkeeping', () => {
   assert.ok(Math.abs(r.pv + r.fc + r.bat - r.load - r.elz - r.net) < 1e-6);
   assert.ok(Math.abs(r.soc - (0.5 + 200 * CFG.BAT_EFF / CFG.BAT_E)) < 1e-9);
   assert.ok(Math.abs(r.h2 - (20 + 100 / CFG.ELZ_KWH_KG)) < 1e-9);
+});
+test('grid-powered electrolysis outside renewable hours only earns the grey H₂ price', () => {
+  const d = { ...makeDay(42), h2Price: 6 };
+  assert.equal(greyPenalty(d, 200, 500, 100, 80), 0, 'covered by PV surplus');
+  assert.equal(greyPenalty(d, 200, 0, 100, 15), 0, 'renewable hour (≤ 20 €/MWh)');
+  assert.ok(Math.abs(greyPenalty(d, 200, 0, 100, 80) - 200 / CFG.ELZ_KWH_KG * (6 - CFG.H2_GREY)) < 1e-9);
 });
 test('minimum loads are respected', () => {
   const d = makeDay(42);

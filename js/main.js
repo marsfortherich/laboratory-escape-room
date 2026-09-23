@@ -13,7 +13,8 @@ import { redraw, FONT } from './textures.js';
 
 // ============================================================ boot
 const params = new URLSearchParams(location.search);
-const SAVE_KEY = 'ple-save-v2', BEST_KEY = 'ple-best-v2', TIME_LIMIT = 60 * 60;
+const BEST_KEY = 'ple-best-v2', TIME_LIMIT = 60 * 60;
+const saveKey = (s) => `ple-save-v2-${s}`;   // one save slot per room (classic = 0, daily = yyyymmdd)
 const store = {
   get(k) { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage unavailable */ } },
@@ -21,6 +22,8 @@ const store = {
 };
 const todaySeed = () => { const d = new Date(); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); };
 const seed = Number(params.get('seed')) || 0;
+const SAVE_KEY = saveKey(seed);
+{ const old = store.get('ple-save-v2'); if (old) { store.set(saveKey(old.seed || 0), old); store.del('ple-save-v2'); } }   // migrate single-slot saves
 const P = makePuzzle(seed);
 const settings = loadSettings();
 setPalette(settings.palette);
@@ -124,7 +127,7 @@ function penalty(sec, why) {
 }
 
 // ------------------------------------------------------------ inventory & journal
-const ITEMS = { handwheel: '🔴 Valve handwheel', permit: '📄 Reconnection permit' };
+const ITEMS = { handwheel: '🔴 Valve handwheel', permit: '🪪 Reconnection permit card' };
 function addItem(id) { if (!G.inventory.includes(id)) { G.inventory.push(id); sound.pickup(); toast(`Picked up: ${ITEMS[id]}`, 'good'); renderInv(); } }
 function useItem(id) { G.inventory = G.inventory.filter((i) => i !== id); renderInv(); }
 function renderInv() { ui.inv.innerHTML = G.inventory.map((i) => `<span class="chip">${ITEMS[i]}</span>`).join(''); }
@@ -173,9 +176,9 @@ function hintTopic() {
     `Run gridctl as root and validate a 24-h dispatch: reach ≥ ${GRID.WIN_RATIO * 100} % of the benchmark's extra profit.`,
     'At negative prices: curtail, charge, electrolyze. At the evening peak: discharge (fuel cell above its break-even). The 💡 advisor gives per-hour advice.'] };
   if (G.stage === 'permit') return { id: 'sync', tiers: [
-    'The tie panel (Q0) is on the east wall next to the exit. Marco pinned a checklist nearby.',
-    'Match the voltage, run the island slightly FASTER than the grid, fix the phase rotation until all three lamps go dark TOGETHER, then close at 12 o\'clock.',
-    `Island ${P.gridV} V, ${(P.gridF + 0.04).toFixed(2)} Hz, rotation L1-L2-L3 ↻. Press CLOSE (or Space) when the needle is in the green sector.`] };
+    'The tie panel (Q0) is on the east wall next to the exit. Marco pinned a checklist nearby, and the grid operator\'s e-mail lists their values.',
+    'Insert the permit card. Match the voltage, run the island slightly FASTER than the grid, and watch the three lamps: if they chase each other instead of going dark together, the incoming phases are swapped. Close on the synchroscope at 12 o\'clock.',
+    `Insert the permit card. Island ${P.gridV} V, ${(P.gridF + 0.04).toFixed(2)} Hz. The lamps chase → press "Swap L2 ↔ L3" once. Press CLOSE (or Space) when the needle is in the green sector.`] };
   return { id: 'exit', tiers: ['Walk out!', 'The exit door is in the east wall of the control room.', 'Go through the open exit door and down the corridor.'] };
 }
 
@@ -194,10 +197,10 @@ const grid = new GridGame((res) => {
   grid.close();
   setStage('permit');
   closeOverlay();
-  toast('📄 Reconnection permit granted. Synchronise at the tie panel (Q0) next to the exit.', 'good');
-});
+  toast('🪪 Reconnection permit card issued. Take it to the tie panel (Q0) next to the exit and synchronise.', 'good');
+}, seed);
 grid.onClose = () => closeOverlay();
-grid.onHint = () => { G.hints.used++; toast('Advisor consulted (counts as a hint).'); };
+grid.onHint = (firstToday) => { if (firstToday) G.hints.used++; penalty(15, 'advisor consulted'); };
 
 const touchMode = isTouchDevice();
 touch = new TouchControls(canvas, {
@@ -211,7 +214,7 @@ touch = new TouchControls(canvas, {
 });
 
 // ============================================================ pointer lock / modes
-let skipMouse = 0;
+let lockedAt = 0;
 function lockPointer() {
   if (touchMode) { enterPlay(); return; }
   const fail = () => { if (G.mode === 'paused') ui.resume.classList.remove('hidden'); };
@@ -223,7 +226,7 @@ function lockPointer() {
 function enterPlay() {
   G.mode = 'play';
   ui.resume.classList.add('hidden');
-  skipMouse = 2;
+  lockedAt = performance.now();
 }
 document.addEventListener('pointerlockchange', () => {
   if (document.pointerLockElement === canvas) enterPlay();
@@ -256,6 +259,12 @@ function closeOverlay() {
   G.panelId = null;
   document.activeElement?.blur?.();
   if (G.mode === 'end' || G.mode === 'start') return;
+  if (G.returnTo && ['hint', 'journal'].includes(G.mode)) {             // back to the terminal / console the player came from
+    const back = G.returnTo; G.returnTo = null;
+    if (back === 'terminal') { openOverlay('terminal'); terminal.open(); } else openGrid();
+    return;
+  }
+  G.returnTo = null;
   G.mode = 'paused';
   touch.enable(touchMode);
   if (touchMode) enterPlay(); else lockPointer();
@@ -364,10 +373,12 @@ function propPanel(id) {
   D.sync = {
     title: 'Grid tie panel · breaker Q0',
     controls: () => `<canvas id="syncCv" class="synccv" width="720" height="420"></canvas>
-      ${sync.closed ? lcd('Q0 CLOSED — the lab is connected to the grid ✔') : !grid.permit ? lcd('Q0 INTERLOCKED — no reconnection permit from the grid operator yet (gridctl).', true) : ''}
+      ${sync.closed ? lcd('Q0 CLOSED — the lab is connected to the grid ✔')
+        : !grid.permit ? lcd('Q0 INTERLOCKED — no reconnection permit from the grid operator yet (gridctl).', true)
+          : !G.permitIn ? `${lcd('Q0 INTERLOCKED — insert the operator\'s permit card.', true)}<button class="btn on" data-act="permit">🪪 Insert the permit card</button>` : lcd('Permit card accepted — interlock released.')}
       <div class="ctl"><label>Island voltage</label><div class="seg">${[-5, -1, 1, 5].map((v) => `<button class="btn" data-act="sv:${v}">${v > 0 ? '+' : '−'}${Math.abs(v)} V</button>`).join('')}</div></div>
       <div class="ctl"><label>Island frequency</label><div class="seg">${[-0.1, -0.01, 0.01, 0.1].map((v) => `<button class="btn" data-act="sf:${v}">${v > 0 ? '+' : '−'}${Math.abs(v)} Hz</button>`).join('')}</div></div>
-      <div class="ctl"><label>Cluster rotation</label><div class="seg"><button class="btn ${sync.isl.seq === 'CW' ? 'on' : ''}" data-act="sq:CW">L1-L2-L3 ↻</button><button class="btn ${sync.isl.seq === 'CCW' ? 'on' : ''}" data-act="sq:CCW">L1-L3-L2 ↺</button></div></div>
+      <div class="ctl"><label>Incomer terminals</label><div class="seg"><button class="btn" data-act="swap">⇄ Swap L2 ↔ L3</button></div><span class="note">jumper position ${sync.swapped ? 'A (as found after the storm repair)' : 'B (L2 ↔ L3 crossed)'}</span></div>
       ${sync.closed ? '' : '<button class="btn big danger" data-act="sclose" style="margin-top:4px">CLOSE Q0 <span style="font-size:12px">(Space)</span></button>'}`,
     anim: () => { const cv = $('syncCv'); if (cv) drawSyncScope(cv.getContext('2d'), cv.width, cv.height, sync); },
     onAct: (a) => {
@@ -375,7 +386,11 @@ function propPanel(id) {
       if (sync.closed) return;
       if (k === 'sv') sync.isl.V = Math.max(200, Math.min(260, sync.isl.V + Number(v)));
       if (k === 'sf') sync.isl.f = Math.round(Math.max(49, Math.min(51, sync.isl.f + Number(v))) * 100) / 100;
-      if (k === 'sq') sync.isl.seq = v;
+      if (k === 'swap') { sync.swapped = !sync.swapped; sound.clack(); }
+      if (k === 'permit') {
+        if (G.inventory.includes('permit')) { useItem('permit'); G.permitIn = true; sound.clack(); toast('The interlock key turns — Q0 can now be closed.', 'good'); }
+        else toast('You have no permit card.', 'bad');
+      }
       if (k === 'sclose') closeTie();
     },
   };
@@ -389,7 +404,7 @@ function propPanel(id) {
 function playMemo() { for (let i = 0; i < 9; i++) sound.beep(140 + Math.random() * 120, 0.09, 'triangle', 0.05, i * 0.11); }
 
 function closeTie() {
-  if (!grid.permit) { sound.bad(); toast('Q0 is interlocked: no reconnection permit yet (gridctl).', 'bad'); return; }
+  if (!grid.permit || !G.permitIn) { sound.bad(); toast(grid.permit ? 'Q0 is interlocked: insert the permit card first.' : 'Q0 is interlocked: no reconnection permit yet (gridctl).', 'bad'); return; }
   const r = sync.check();
   if (r.ok) {
     sync.closed = true; sound.thunk(); sound.fanfare();
@@ -468,6 +483,7 @@ function openGrid() { openOverlay('grid'); grid.open(); }
 // ------------------------------------------------------------ hint, journal, menu overlays
 function openHint() {
   if (G.mode === 'start' || G.mode === 'end') return;
+  G.returnTo = ['terminal', 'grid'].includes(G.mode) ? G.mode : G.returnTo;
   if (G.mode === 'terminal') terminal.close();
   if (G.mode === 'grid') grid.close();
   openOverlay('hint');
@@ -490,6 +506,7 @@ function renderHint() {
 }
 function openJournal() {
   if (G.mode === 'start' || G.mode === 'end') return;
+  G.returnTo = ['terminal', 'grid'].includes(G.mode) ? G.mode : G.returnTo;
   if (G.mode === 'terminal') terminal.close();
   if (G.mode === 'grid') grid.close();
   openOverlay('journal');
@@ -504,6 +521,7 @@ function openJournal() {
 function openMenu(fromStart = false) {
   if (G.mode === 'end') return;
   if (!fromStart) openOverlay('menu');
+  G.menuAt = performance.now();
   ui.menu.querySelector('.menu-actions').classList.toggle('hidden', fromStart);
   ui.menu.querySelector('h2').textContent = fromStart ? 'Settings' : 'Menu';
   ui.menu.querySelector('h3').classList.toggle('hidden', fromStart);
@@ -534,6 +552,7 @@ addEventListener('keydown', (e) => {
   if (G.mode === 'start' && code === 'Escape' && !ui.menu.classList.contains('hidden')) { ui.menu.classList.add('hidden'); return; }
   if (G.mode === 'start' || G.mode === 'end') return;
   if (code === 'Escape') {
+    if (G.mode === 'menu' && performance.now() - (G.menuAt || 0) < 200) return;   // same Esc that unlocked the pointer
     if (G.mode === 'grid' && grid.modalOpen()) { grid.$('gModal').classList.add('hidden'); return; }
     if (OVERLAYS.includes(G.mode)) { e.preventDefault(); closeOverlay(); }
     else if (G.mode === 'paused' || (G.mode === 'play' && !document.pointerLockElement)) openMenu();
@@ -570,18 +589,20 @@ function look(dx, dy) {
 }
 addEventListener('mousemove', (e) => {
   if (G.mode !== 'play' || touchMode || document.pointerLockElement !== canvas) return;
-  if (skipMouse > 0) { skipMouse--; return; }
-  if (Math.abs(e.movementX) > 200 || Math.abs(e.movementY) > 200) return;   // pointer-lock glitch spikes
-  look(e.movementX, e.movementY);
+  const big = Math.abs(e.movementX) > 150 || Math.abs(e.movementY) > 150;
+  if (big && performance.now() - lockedAt < 150) return;          // bogus jump right after the pointer locks
+  const clamp = (v) => Math.max(-400, Math.min(400, v));           // fast flicks with high-DPI mice are clamped, not eaten
+  look(clamp(e.movementX), clamp(e.movementY));
 });
 canvas.addEventListener('mousedown', (e) => { if (G.mode === 'play' && !touchMode && e.button === 0) interact(G.target); });
 
 // ============================================================ movement & collision
 function blocked(x, z) {
   const r = player.r;
+  const inside = (c, px, pz) => px > c.minX - r && px < c.maxX + r && pz > c.minZ - r && pz < c.maxZ + r;
   for (const c of colliders) {
     if (c.enabled === false) continue;
-    if (x > c.minX - r && x < c.maxX + r && z > c.minZ - r && z < c.maxZ + r) return true;
+    if (inside(c, x, z) && !inside(c, player.x, player.z)) return true;   // already overlapping → let the player walk out
   }
   return false;
 }
@@ -632,7 +653,7 @@ function stateLabel(id) {
     case 'bus': return s.trip.some(Boolean) ? 'TRIP!' : `${f.live.filter(Boolean).length}/3 phases live`;
     case 'drawer': return G.drawer.open ? (G.drawer.taken ? 'empty' : 'open') : 'locked';
     case 'board': return G.board.solved ? 'OUT = 1' : '';
-    case 'sync': return sync.closed ? 'closed ✔' : grid.permit ? 'permit ✔' : 'interlocked';
+    case 'sync': return sync.closed ? 'closed ✔' : G.permitIn ? 'armed' : grid.permit ? 'insert permit' : 'interlocked';
     case 'exit': return G.exitOpen ? 'open' : 'locked';
     case 'rec1': case 'rec2': case 'rec3': case 'rec4': return G.heard[id] ? 'played' : 'new';
     default: return '';
@@ -835,7 +856,7 @@ function save() {
     v: 2, seed, stage: G.stage, at: Date.now(),
     player: { x: player.x, z: player.z, yaw: player.yaw, pitch: player.pitch },
     sim: sim.s, term: terminal.serialize(), grid: grid.serialize(), sync: sync.serialize(),
-    G: { inventory: G.inventory, journal: G.journal, heard: G.heard, hints: G.hints, time: G.time, drawer: G.drawer, board: G.board, diag: G.diag, f2seen: G.f2seen, exitOpen: G.exitOpen, catPets: G.catPets, termOpened: G.termOpened, gridResult: G.gridResult },
+    G: { inventory: G.inventory, journal: G.journal, heard: G.heard, hints: G.hints, time: G.time, drawer: G.drawer, board: G.board, diag: G.diag, f2seen: G.f2seen, exitOpen: G.exitOpen, catPets: G.catPets, termOpened: G.termOpened, gridResult: G.gridResult, permitIn: G.permitIn },
   });
 }
 function restore(sv) {
@@ -863,9 +884,11 @@ addEventListener('pagehide', save);
 
 // ============================================================ start & end screens
 function showStart() {
-  const sv = store.get(SAVE_KEY);
   const best = store.get(BEST_KEY) || {};
   const daily = todaySeed();
+  const live = (s) => { const v = store.get(saveKey(s)); return v && v.stage !== 'won' ? v : null; };
+  const svC = live(0), svD = live(daily);
+  const cont = (v, k) => (v ? `<button class="btn big" data-start="${k}">Continue ${k === 'cont-classic' ? 'classic' : 'daily'} <span class="small">(${mmss(v.G.time.elapsed + v.G.time.penalty)})</span></button>` : '');
   const card = $('startCard');
   card.innerHTML = `<h1>${INTRO.title}</h1>
     <p class="lead">${INTRO.lead}</p><p>${INTRO.body}</p>
@@ -873,9 +896,9 @@ function showStart() {
       ? '<div>Left thumb: move</div><div>Right thumb: look</div><div>Tap an object / USE: interact</div><div>💡 hints · 📓 journal</div>'
       : '<div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> run</div><div><kbd>Mouse</kbd> look</div><div><kbd>E</kbd>/<kbd>Click</kbd> use</div><div><kbd>H</kbd> hint</div><div><kbd>J</kbd> journal</div><div><kbd>Esc</kbd> menu</div>'}</div>
     <div class="start-btns">
-      ${sv && sv.stage !== 'won' ? `<button class="btn big" data-start="continue">Continue <span class="small">(${sv.seed ? 'daily ' + sv.seed : 'classic'} · ${mmss(sv.G.time.elapsed + sv.G.time.penalty)})</span></button>` : ''}
-      <button class="btn big ${sv ? 'alt' : ''}" data-start="classic">New game · Classic room</button>
-      <button class="btn big alt" data-start="daily">Daily room · ${String(daily).slice(6)}.${String(daily).slice(4, 6)}.</button>
+      ${cont(svC, 'cont-classic')}${cont(svD, 'cont-daily')}
+      <button class="btn big ${svC || svD ? 'alt' : ''}" data-start="classic">New game · Classic room</button>
+      <button class="btn big alt" data-start="daily">${svD ? 'Restart' : 'Play'} daily room · ${String(daily).slice(6)}.${String(daily).slice(4, 6)}.</button>
       <button class="btn" data-start="settings">⚙ Settings</button>
     </div>
     ${Object.keys(best).length ? `<p class="note">Best: ${Object.entries(best).map(([k, v]) => `${k === '0' ? 'Classic' : 'Daily ' + k} ${mmss(v.time)} (${v.rank})`).join(' · ')}</p>` : ''}
@@ -884,12 +907,14 @@ function showStart() {
     const a = b.dataset.start;
     sound.init();
     if (a === 'settings') { openMenu(true); return; }
-    if (a === 'continue') {
-      if ((sv.seed || 0) !== seed) { location.search = `?seed=${sv.seed}&continue=1`; return; }
-      restore(sv); begin(false); return;
+    if (a === 'cont-classic' || a === 'cont-daily') {
+      const s = a === 'cont-daily' ? daily : 0;
+      if (s !== seed) { location.search = s ? `?seed=${s}&continue=1` : '?continue=1'; return; }
+      restore(store.get(SAVE_KEY)); begin(false); return;
     }
     const want = a === 'daily' ? daily : 0;
-    store.del(SAVE_KEY);
+    if ((want ? svD : svC) && !confirm('Start this room over? The run in progress will be lost.')) return;
+    store.del(saveKey(want));
     if (want !== seed) { location.search = want ? `?seed=${want}&autostart=1` : '?autostart=1'; return; }
     begin(true);
   }));

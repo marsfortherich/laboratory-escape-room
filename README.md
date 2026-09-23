@@ -5,10 +5,10 @@ A first-person 3D escape room in the browser about **3-phase island grids, hydro
 > Friday, 18:40. A storm has knocked out the public grid. You are locked in the booth of a solar test laboratory.
 > The door is driven by a 3-phase motor, and the emergency lights last about an hour.
 
-- **Act 1 – The booth.** Bring a lab microgrid to life: a CPV test rig under a sun simulator, three single-phase grid-forming inverters, a 10 kWh battery, a PEM electrolyzer, a hydrogen tank and a fuel cell. Each phase is its own island, so the door motor only starts once **every** phase can carry 3 kW.
+- **Act 1 – The booth.** Bring a lab microgrid to life: a III-V PV test rig under a sun simulator, three single-phase grid-forming inverters, a 10 kWh battery, a PEM electrolyzer, a hydrogen tank and a fuel cell. Each phase is its own island, so the door motor only starts once **every** phase can carry 3 kW.
 - **Act 2 – The control room.** Crack Marco Volta's shell account using clues from the 3D world: a cat's collar tag, a lamp count, a binary LED row and a logic board.
 - **Act 3 – gridctl.** Validate a 24-hour dispatch against day-ahead price and weather forecasts. There are negative prices, evening spikes and forecast errors, and your plan is scored against a perfect-foresight optimum.
-- **Finale – Synchronise.** Match voltage and frequency, fix the phase rotation with the dark-lamp method, and close the tie breaker at 12 o'clock on the synchroscope. Then walk out into the dawn.
+- **Finale – Synchronise.** Insert the permit card, match voltage and frequency, spot the swapped incomer phases with the dark-lamp method, and close the tie breaker at 12 o'clock on the synchroscope. Then walk out into the dawn.
 
 A **Classic room** follows the walkthrough below. A **Daily room** changes every code and clue each day.
 
@@ -16,7 +16,7 @@ A **Classic room** follows the walkthrough below. A **Daily room** changes every
 
 ## Play
 
-- **Online:** see [Deploy to GitHub Pages](#deploy-to-github-pages) below.
+- **Online:** **<https://labescape.marsindustries.dev/>** (GitHub Pages, deployed automatically from `main`).
 - **Offline:** download or clone the repo and **double-click `index.html`**. It runs straight from disk, with no server and no internet (Three.js is bundled).
 
 | | Desktop | Phone / tablet |
@@ -28,7 +28,7 @@ A **Classic room** follows the walkthrough below. A **Daily room** changes every
 | Menu & settings | `Esc` | ☰ |
 
 - **Settings:** look sensitivity, invert Y, FOV, volume, UI scale, reduced motion, a colour-blind-safe palette and render quality.
-- **Saving:** progress is saved automatically in your browser. Use **Continue** on the title screen.
+- **Saving:** progress is saved automatically in your browser, with one slot per room (classic and today's daily). Use **Continue** on the title screen.
 
 ## Deploy to GitHub Pages
 
@@ -89,18 +89,20 @@ Always run `npm run build` before committing, so that double-click and branch de
 ## The science, briefly
 
 - **Island microgrid.** Three single-phase grid-forming inverters each form one phase, like a battery-inverter cluster. Power can't move between phases. At every instant generation equals load, so sources only deliver what is consumed, in the order PV, then battery, then fuel cell. Storage drains by the power it actually delivers. Demand above a phase's capacity pushes the inverter to its current limit; the voltage collapses and the under-voltage relay trips.
-- **One lab clock.** Everything runs on the same ×360 time-lapse: 10 s of play is 1 lab hour.
+- **One lab clock.** Everything runs on the same ×360 time-lapse (10 s of play is 1 lab hour), except the 5 s door-motor start, which runs in real time.
   - Battery: 10 kWh, 95 % efficiency each way.
   - Electrolyzer: 55 kWh per kg of H₂. Fuel cell: 18 kWh per kg, which makes power → H₂ → power about 33 % efficient.
   - H₂ buffer tank: 30 bar, 0.22 kg.
+  - PV: 6 m² of III-V modules at η 30 % under 3 suns = 5.4 kW. The lamps draw about 60 kW from the emergency generator, so the whole lamp → light → PV → AC chain is only about 9 % efficient.
 - **Door.** A 3-phase induction motor whose starting current loads 3 kW onto each phase for 5 s. If one phase is dead, the motor hums and stalls ("single-phasing").
 - **gridctl.**
   - PV: 600 kWp at a performance ratio of 0.82, with Kasten–Czeplak cloud attenuation and forecast errors that persist from hour to hour.
   - Prices: day-ahead forecast vs. intraday actual, with actual prices reacting to cloud forecast errors.
   - Grid: fees on imports, a ±300 kW connection limit.
   - Devices: minimum loads for electrolyzer and fuel cell, battery wear cost, a daily H₂ price.
+  - A simplified EU renewable-hydrogen (RFNBO) rule: H₂ from grid power only fetches the day's price in hours at or below 20 €/MWh. Otherwise it sells as grey H₂ at €2/kg.
   - The benchmark is a dynamic program over battery energy, replayed through the real hour model so it stays feasible.
-- **Synchronisation.** The synchroscope needle turns at the slip frequency. The lamp voltages are |V_island − V_grid| per pole: all three go dark together when rotation and phase match, and they chase each other when the rotation is wrong.
+- **Synchronisation.** The synchroscope needle turns at the slip frequency. Each lamp sees |V_island − V_grid| across its breaker pole: all three go dark together when rotation and phase match, and they chase each other when the rotation is wrong. The lamps are filaments (brightness ∝ V², practically dark below 25 % voltage), so they look dark over about ±25°. That's why you close on the synchroscope, not the lamps.
 
 The review notes behind many of these choices are in [REVIEWS.md](REVIEWS.md).
 
@@ -118,7 +120,7 @@ Three.js (MIT, © three.js authors), bundled into `dist/game.js`. Everything els
 2. INV-1: **ON**, phase **L1**.
 3. INV-2: **ON**, **CHARGE**, **L1**. Electrolyzer: **ON**, **L1**. The load is 2 + 3 + 0.2 kW, which is just under the 5.24 kW PV supply.
 4. While storage fills, read the resistor on the bench: yellow-violet-red = 47 × 10² = **4700** Ω. Open the drawer with `4700`, take the handwheel and use it on the H₂ tank.
-5. Once the battery is above 50 % and H₂ above 60 %: Electrolyzer **OFF**; INV-2 **DISCHARGE** on **L2**; tank valve **OPEN**; fuel cell **START**; INV-3 **ON**, **L3**.
+5. Once the battery is above 35 % and H₂ above 45 % (a margin over the 25 % / 30 % limits): Electrolyzer **OFF**; INV-2 **DISCHARGE** on **L2**; tank valve **OPEN**; fuel cell **START**; INV-3 **ON**, **L3**.
 6. Door controller: **OPEN DOOR**. Each phase has at least 3 kW of headroom.
 
 **Control room** (the PC)
@@ -134,7 +136,7 @@ FW-BOARD on the desk: switches **A=1 B=0 C=0 D=1**, then TEST. The display shows
 su root                      # GRID150H2
 gridctl
 ```
-**gridctl:** at negative prices, curtail, charge and run the electrolyzer. Around the evening peak, discharge the battery (and run the fuel cell above its break-even price). You need at least 55 % of the benchmark's extra profit. The advisor helps with break-evens.
+**gridctl:** at negative prices, curtail, charge and run the electrolyzer. Run the electrolyzer on PV surplus below its break-even price, but not on night grid power (that H₂ is grey). Around the evening peak, discharge the battery, and run the fuel cell above its break-even. You need at least 55 % of the benchmark's extra profit. The break-evens are shown in the forecast box. The advisor costs 0:15 per use.
 
-**Tie panel Q0** (next to the exit): island **231 V**, **50.07 Hz** (slightly faster than the grid's 50.03), rotation **L1-L2-L3 ↻**. Press **CLOSE** (Space) when the needle is in the green sector. Then walk out through the exit.
+**Tie panel Q0** (next to the exit): insert the **permit card**; island **231 V**, **50.07 Hz** (slightly faster than the grid's 50.03). The lamps chase each other, so press **Swap L2 ↔ L3** once; now they go dark together. Press **CLOSE** (Space) when the needle is in the green sector. Then walk out through the exit.
 </details>

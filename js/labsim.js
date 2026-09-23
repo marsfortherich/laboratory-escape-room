@@ -7,7 +7,8 @@
 //   (merit order: PV → battery → fuel cell); storage drains by DELIVERED power, so energy is conserved.
 // • If demand on a phase exceeds what its inverters can deliver, they hit their current limit, the
 //   voltage collapses and the under-voltage relay trips that phase.
-// • One lab clock for everything: time-lapse ×360 (10 real seconds = 1 lab hour).
+// • One lab clock for everything: time-lapse ×360 (10 real seconds = 1 lab hour) — except the door-motor
+//   start, which takes a few real seconds and therefore runs in real time (×1).
 // • The door is driven by a 3-phase induction motor: starting it loads EVERY phase with 3 kW for 5 s.
 
 export const PH = ['L1', 'L2', 'L3'];
@@ -20,7 +21,8 @@ export function setPalette(name) { PALETTES[name].forEach((c, i) => { PH_COLORS[
 
 export const C = {
   TL: 360,                 // time-lapse factor
-  PV_DC: 5.4,              // kW DC: 6 m² CPV modules (η 38 %) under 2.4 suns
+  PV_DC: 5.4,              // kW DC: 6 m² III-V modules, η 30 % at 3 suns (3000 W/m²)
+  LAMP_KW: 60,             // xenon lamp electrical input (≈ 30 % light yield → 18 kW of light on the rig)
   INV_EFF: 0.97,           // INV-1 efficiency → 5.24 kW AC
   BAT_KWH: 10, BAT_CH: 2.0, BAT_DIS: 3.5, BAT_EFF: 0.95, BAT_MIN: 0.25,
   ELZ_P: 3.0, ELZ_KWH_KG: 55,
@@ -98,6 +100,7 @@ export class LabSim {
     s.t += dt;
     if (s.fc.running) s.fc.rt += dt;
     let f = this.compute();
+    const k = (s.door.state === 'opening' ? 1 / 3600 : K) * dt;   // lab hours elapsed this tick
 
     // under-voltage protection
     for (let p = 0; p < 3; p++) {
@@ -114,19 +117,19 @@ export class LabSim {
     }
 
     // storage by delivered power
-    if (f.bat < 0) s.bat.soc = Math.min(1, s.bat.soc - f.bat * C.BAT_EFF * K * dt / C.BAT_KWH);
+    if (f.bat < 0) s.bat.soc = Math.min(1, s.bat.soc - f.bat * C.BAT_EFF * k / C.BAT_KWH);
     if (f.bat > 0) {
-      s.bat.soc = Math.max(0, s.bat.soc - f.bat / C.BAT_EFF * K * dt / C.BAT_KWH);
+      s.bat.soc = Math.max(0, s.bat.soc - f.bat / C.BAT_EFF * k / C.BAT_KWH);
       if (s.bat.soc <= C.BAT_MIN) this.emit('Battery BMS: SOC reached 25 % — discharge blocked.', 'bad');
     }
     if (f.elz > 0) {
       const before = s.h2.level;
-      s.h2.level = Math.min(1, s.h2.level + C.ELZ_P / C.ELZ_KWH_KG * K * dt / C.H2_KG);
+      s.h2.level = Math.min(1, s.h2.level + C.ELZ_P / C.ELZ_KWH_KG * k / C.H2_KG);
       if (before < C.FC_START && s.h2.level >= C.FC_START) this.emit('H₂ tank above 30 % — enough to start the fuel cell.', 'good');
       if (s.h2.level >= 1) this.emit('H₂ tank full (30 bar) — electrolyzer idles.');
     }
     if (f.fc > 0) {
-      s.h2.level = Math.max(0, s.h2.level - f.fc / C.FC_KWH_KG * K * dt / C.H2_KG);
+      s.h2.level = Math.max(0, s.h2.level - f.fc / C.FC_KWH_KG * k / C.H2_KG);
       if (s.h2.level <= 0) { s.fc.running = false; s.fc.rt = 0; this.emit('Fuel cell shut down: H₂ tank empty.', 'bad'); }
     }
     if (s.fc.running && !s.h2.valve) { s.fc.running = false; s.fc.rt = 0; this.emit('Fuel cell shut down: H₂ valve closed.', 'bad'); }
@@ -158,16 +161,16 @@ export class LabSim {
       'Light on the modules makes DC. The lab bus is AC.',
       'Something has to convert the PV power — look at the inverters on the right wall.',
       'INV-1: power ON, output phase L1.'] };
-    const needBat = s.bat.soc < 0.5, needH2 = s.h2.level < 0.6;
+    const needBat = s.bat.soc < 0.35, needH2 = s.h2.level < 0.45;
     const charging = s.inv.bat.on && s.inv.bat.mode === 'charge' && s.inv.bat.ph === s.inv.pv.ph;
     const elzing = s.elz.on && s.elz.ph === s.inv.pv.ph;
     if ((needBat && !charging) || (needH2 && !elzing)) return { id: 'store', tiers: [
       'The door motor needs all three phases. One PV inverter can only energize one of them — and the other two sources are empty.',
       'Loads only run from a source on the SAME phase. Use PV power to fill the battery and the H₂ tank.',
-      `INV-2: ON, CHARGE, phase ${pvPh}. Electrolyzer: ON, phase ${pvPh}. 2 + 3 + 0.2 kW aux = 5.2 kW ≤ 5.24 kW PV. Fill battery ≥ 50 % and H₂ ≥ 60 %.`] };
+      `INV-2: ON, CHARGE, phase ${pvPh}. Electrolyzer: ON, phase ${pvPh}. 2 + 3 + 0.2 kW aux = 5.2 kW ≤ 5.24 kW PV. Fill the battery to ≥ 35 % and the tank to ≥ 45 % — a margin above the 25 % / 30 % limits.`] };
     if (needBat || needH2) return { id: 'wait', tiers: [
       'Storage takes time — even at ×360 time-lapse.',
-      `Battery ${(s.bat.soc * 100).toFixed(0)} % (aim ≥ 50 %), H₂ ${(s.h2.level * 100).toFixed(0)} % (aim ≥ 60 %). The door drive drains ~17 % battery and ~40 % H₂ per opening.`,
+      `Battery ${(s.bat.soc * 100).toFixed(0)} % (aim ≥ 35 %), H₂ ${(s.h2.level * 100).toFixed(0)} % (aim ≥ 45 %). The 5 s motor start itself is cheap, but idle phases keep draining their storage through the 0.2 kW aux load at ×360.`,
       'Meanwhile, solve the valve problem: the H₂ tank has no handwheel.'] };
     if (!s.h2.wheel) return { id: 'wheel', tiers: [
       'The fuel cell needs hydrogen from the tank — but can you actually open the valve?',
@@ -204,21 +207,22 @@ export class LabSim {
       title: 'Sun Simulator · Control Keypad',
       controls: () => s.sun.unlocked
         ? `<div class="ctl"><label>Lamp array</label>${onoff('sun', s.sun.on)}</div>
-           <p class="note">${this.puzzle.lamps} xenon arc lamps giving 2.4 suns (2400 W/m²) on the CPV test rig. Fed from the building's emergency generator ("temporarily" — M.V.).</p>`
+           <p class="note">Xenon arc lamps giving 3 suns (3000 W/m²) on the test rig. Lamp input ≈ ${C.LAMP_KW} kW from the building's emergency generator ("temporarily" — M.V.). Lamp → light → PV → AC is only ≈ 9 % efficient.</p>`
         : `<p class="note">SYSTEM LOCKED — enter 4-digit PIN. (Number keys work too.)</p>
            <div class="keypad">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => `<button class="btn" data-act="pin:${d}">${d}</button>`).join('')}
            <button class="btn warn" data-act="pin:C">C</button><button class="btn" data-act="pin:0">0</button><button class="btn on" data-act="pin:OK">OK</button></div>`,
       live: () => s.sun.unlocked
-        ? lcd(`LAMPS ${s.sun.on ? 'ON ' : 'OFF'}   IRRADIANCE ${s.sun.on ? '2400' : '   0'} W/m²`)
+        ? lcd(`LAMPS ${s.sun.on ? 'ON ' : 'OFF'}   IRRADIANCE ${s.sun.on ? '3000' : '   0'} W/m²
+LAMP INPUT ${s.sun.on ? C.LAMP_KW : 0} kW (emergency generator)`)
         : lcd(`PIN: ${(s.sun.pin + '____').slice(0, 4).split('').join(' ')}`, true),
     };
 
     P.pv = {
-      title: 'PV Test Rig · CPV modules',
-      controls: () => `<div class="kv"><span>Modules</span><span>3 × 2 m² concentrator PV, triple-junction cells (η ≈ 38 %)</span>
-        <span>Output at 2.4 suns</span><span>${C.PV_DC} kW DC</span><span>Connected to</span><span>INV-1 (hybrid inverter)</span></div>
-        <p class="note">6 m² × 2400 W/m² × 0.38 ≈ 5.4 kW. The modules make DC; only an inverter can put it on the 230 V AC bus.</p>`,
-      live: () => lcd(`IRRADIANCE  ${s.sun.on ? '2400' : '0'} W/m²\nDC POWER    ${fmt(f.pvAvail / C.INV_EFF)} kW available\nAC FEED-IN  ${fmt(f.pv)} kW (as much as the phase consumes)`),
+      title: 'PV Test Rig · III-V modules',
+      controls: () => `<div class="kv"><span>Modules</span><span>3 × 2 m² III-V multi-junction modules (η ≈ 30 %)</span>
+        <span>Output at 3 suns</span><span>${C.PV_DC} kW DC</span><span>Connected to</span><span>INV-1 (hybrid inverter)</span></div>
+        <p class="note">6 m² × 3000 W/m² × 0.30 = 5.4 kW. The modules make DC; only an inverter can put it on the 230 V AC bus.</p>`,
+      live: () => lcd(`IRRADIANCE  ${s.sun.on ? '3000' : '0'} W/m²\nDC POWER    ${fmt(f.pvAvail / C.INV_EFF)} kW available\nAC FEED-IN  ${fmt(f.pv)} kW (as much as the phase consumes)`),
     };
 
     const invLive = (name, avail, out, inv, extra = '') => {
@@ -329,7 +333,7 @@ export class LabSim {
 
     P.door = {
       title: 'Door Drive Controller',
-      controls: () => (s.door.state === 'open' ? '' : `<p class="note">Sliding door, fail-secure. Drive: 3-phase induction motor — starting current loads <b>${C.DOOR_P} kW on EACH phase</b> for ${C.DOOR_T} s. A missing phase makes the motor hum and stall ("single-phasing").</p>
+      controls: () => (s.door.state === 'open' ? '' : `<p class="note">Sliding door, fail-secure. Drive: 3-phase induction motor — starting current loads <b>${C.DOOR_P} kW on EACH phase</b> for ${C.DOOR_T} s (real time — the ×360 time-lapse pauses while the motor starts). A missing phase makes the motor hum and stall ("single-phasing").</p>
         <div class="ctl"><button class="btn big" data-act="door:open" style="margin:0" ${s.door.state === 'opening' ? 'disabled' : ''}>OPEN DOOR</button></div>`),
       live: () => (s.door.state === 'open' ? lcd('STATUS  OPEN ✔') :
         lcd(PH.map((n, p) => `${n}  headroom ${fmt(f.head[p]).padStart(5)} kW  ${f.head[p] >= C.DOOR_P - 1e-6 ? '✔ ready' : '✘'}`).join('\n') +

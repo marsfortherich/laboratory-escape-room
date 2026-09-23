@@ -1,6 +1,6 @@
 # Expert reviews
 
-Three specialist reviewers looked at v1 of the game. v2 was rebuilt around their findings, and the same reviewers then re-reviewed it.
+Three specialist reviewers looked at v1 of the game. v2 was rebuilt around their findings, the same reviewers re-reviewed it, and v2.1 addresses the second round.
 
 | Reviewer | Focus |
 |---|---|
@@ -59,4 +59,36 @@ Three specialist reviewers looked at v1 of the game. v2 was rebuilt around their
 
 ## Round 2 — v2 scores
 
-_Pending — filled in after the re-review._
+| | v1 | **v2** | Sub-scores v2 |
+|---|---|---|---|
+| 🔬 Science | 6.5 | **8.5** | accuracy 8 · educational value 8.5 · depth 8.5 |
+| 🔐 Escape room | 5.5 | **7.5** | puzzle design 7 · clue fairness 8 · flow/pacing 6.5 · theme/narrative 8 |
+| 🎮 Video game | 6.5 | **8.0** | controls/feel 7.5 · UX/onboarding 8.5 · audio-visual 7.5 · technical 8 · replayability 6.5 |
+
+What the reviewers confirmed in v2:
+- 🔬 Energy is conserved, and the door physics is right. The benchmark is feasible across 150 days, and nobody scores above 100 %. The break-even tips are correct, and the synchroscope and dark-lamp maths check out.
+- 🔐 The game no longer gives answers away. The drawer is a real parallel track. The clues cross between rooms. The logic board can't be brute-forced for free. There are no hard softlocks.
+- 🎮 All 12 bugs from round 1 are fixed. The lights following the energised phases, the finale and the priced hints are "real improvements".
+
+### Changes after round 2 (v2.1)
+
+| Reviewer finding | Change |
+|---|---|
+| 🔬 The 5 s door start ran on the ×360 clock (half a lab hour, 1.7 kWh) | The time-lapse pauses during the motor start. Storage targets are now honest: ≥ 35 % battery and ≥ 45 % H₂, a margin above the BMS and fuel-cell limits. Tested. |
+| 🔐 The door controller could show READY and still stall | Fixed by the real-time start: the start itself drains less than 1 %. |
+| 🔬 The finale's reversed island rotation contradicted Act 1, where the same inverters started the door motor forwards | The island rotation is now fixed. The storm crew re-terminated the **incoming cable** with L2/L3 swapped, and the player fixes it with **Swap L2 ↔ L3** (the grid operator's e-mail warns about it). |
+| 🔐 The sync panel printed both rotations and coloured ΔV/Δf red or green, so it was a "match the numbers" task | The rotation readout is gone and the readouts are neutral. **The lamps are the only rotation clue.** |
+| 🔬 Lamp brightness was linear in voltage | Filament model: brightness ∝ V², dark below 25 % voltage, so the lamps look dark over about ±25°. The checklist now says "close on the synchroscope". |
+| 🔬 Failure messages described rotating generators; the checklist tolerances didn't match the code | The messages now describe inverters and current limits. Tolerances are ±2 % / ±10°, identical in the code and the checklist. |
+| 🔬 38 % CPV under diffuse lamp light isn't plausible | Relabelled as III-V modules, η 30 % at 3 suns, with a 60 kW lamp-input readout (about 9 % lamp → AC). |
+| 🔬 Overcast days weren't overcast; grid power became "green" H₂ | The overcast cloud base is 0.95. A simplified **EU RFNBO rule** applies: grid-powered H₂ is grey (€2/kg) unless the price is ≤ 20 €/MWh. The battery's end value includes wear. |
+| 🔐 The sun-sim panel gave away the lamp count; the Caesar shift could be brute-forced | The count was removed from the text. A wrong `decode` shift triggers a 5 s cooldown. |
+| 🔐 The advisor was hint-inflating but cost no time, and break-evens were only taught by the advisor | Break-evens are always shown in the forecast box. The advisor costs +0:15 per use and counts as one hint per day. |
+| 🔐 The permit was only a token | The **permit card** must be inserted into the Q0 interlock. |
+| 🔐 🎮 Daily rooms always used the same trading day; one save slot was overwritten | The trading day is seeded by the daily room. There is **one save slot per room**, with a confirm before a run is discarded. |
+| 🎮 Windows touchscreen laptops were forced into touch mode | Touch mode only applies when there is no fine pointer (`any-pointer: fine`). |
+| 🎮 Fast mouse flicks were dropped | Spikes are ignored only in the first 150 ms after locking; after that they are clamped. |
+| 🎮 Holding Enter on a focused "▶▶ 3 h" button fast-forwarded the day | Buttons blur after a click, and repeated Enter is always swallowed while the console is open. |
+| 🎮 A hint or the journal opened from the terminal dropped you back into the 3D world | Overlays return to the terminal or console you came from. |
+| 🎮 A door collider switching back on could trap the player | Colliders the player already overlaps are ignored. |
+| 🎮 The Esc that unlocks the pointer might also close the menu | Esc is debounced for 200 ms after the menu opens. |

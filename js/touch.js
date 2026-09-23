@@ -1,7 +1,9 @@
 // Touch controls: left-side virtual joystick, right-side drag to look, tap an object to use it,
 // plus on-screen buttons. Active on coarse-pointer devices (phones / tablets).
 
-export const isTouchDevice = () => matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window && navigator.maxTouchPoints > 0);
+// Touch mode only when the primary pointer is coarse AND no fine pointer (mouse/trackpad) exists —
+// a Windows touchscreen laptop or 2-in-1 with a mouse keeps pointer-lock mouse controls.
+export const isTouchDevice = () => matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches;
 
 export class TouchControls {
   /** handlers: { look(dx, dy), tap(clientX, clientY), use(), menu(), hint(), journal(), sprint(bool) } */

@@ -110,6 +110,7 @@ export class Terminal {
     this.pw = null;
     this.booted = false;
     this.pending = null;
+    this.decodeLock = 0;
     this.progress = { mv: false, f1: false, diag: false, root: false, mail: false };
 
     this.inp.addEventListener('keydown', (e) => this.key(e));
@@ -293,10 +294,13 @@ export class Terminal {
         if (r.err) return this.print('decode: ' + r.err, 'err');
         const k = parseInt(a[1], 10);
         if (Number.isNaN(k)) return this.print('decode: shift must be a number', 'err');
+        const wait = Math.ceil((this.decodeLock - Date.now()) / 1000);
+        if (wait > 0) return this.print(`decode: key schedule cooling down — retry in ${wait} s`, 'err');
         const res = caesar(r.c, -k);
         const hit = res.includes('fragment');
         this.print(res, hit ? 'hi' : '');
         if (hit) this.progress.f1 = true;
+        else this.decodeLock = Date.now() + 5000;   // no free brute force
       },
       scada: (a) => {
         if (this.cur.user === 'guest') return this.print('scada: permission denied (requires group scada)', 'err');

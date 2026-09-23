@@ -59,7 +59,7 @@ export function emails(P) {
     },
     {
       from: 'dispatch@tso-grid.example', subj: 'RE: Reconnection after outage — procedure',
-      body: `Hello Solar Test Laboratory,\nafter the storm outage, reconnection of your site requires:\n  1) a validated day-ahead dispatch schedule (gridctl, ≥ ${Math.round(0.55 * 100)} % of the optimum),\n  2) manual synchronisation at your tie breaker Q0.\nOur side: ${P.gridV} V, ${P.gridF.toFixed(2)} Hz, rotation L1-L2-L3 (clockwise).\nThe reconnection permit will be issued automatically once the schedule is validated.\n— Grid Dispatch`,
+      body: `Hello Solar Test Laboratory,\nafter the storm outage, reconnection of your site requires:\n  1) a validated day-ahead dispatch schedule (gridctl, ≥ ${Math.round(0.55 * 100)} % of the optimum),\n  2) manual synchronisation at your tie breaker Q0.\nOur side: ${P.gridV} V, ${P.gridF.toFixed(2)} Hz, rotation L1-L2-L3 (clockwise) at the substation.\nNB: our storm crew re-terminated your incomer cable at Q0 tonight in a hurry — check the phase rotation before closing.\nThe reconnection permit card is issued automatically once the schedule is validated.\n— Grid Dispatch`,
     },
     {
       from: 'marco.volta@solarlab.example', subj: 'Out of office',
@@ -70,11 +70,14 @@ export function emails(P) {
 
 export function checklistText() {
   return `SYNC CHECKLIST — tie breaker Q0
+0. Permit card into the interlock
 1. Island voltage = grid voltage (± 2 %)
 2. Island frequency a hair ABOVE grid
    (needle creeps clockwise, slip ≤ 0.1 Hz)
 3. Check phase ro▒▒▒▒n — the three lamps
-   must go dark TOGETHER, not chase
-4. Close when the needle is at 12 (± 10°)
+   must go dark TOGETHER, not chase.
+   Chasing? → swap two incoming phases
+4. Close on the SYNCHROSCOPE at 12 (± 10°)
+   (lamps look dark over a wide band)
                                    — M.V.`;
 }

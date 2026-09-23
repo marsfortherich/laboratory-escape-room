@@ -2,45 +2,54 @@
 // Real procedure: match voltage, run the island a hair FAST (needle turns slowly clockwise),
 // verify phase rotation with the three "dark lamps" (dark together = same sequence, chasing = wrong),
 // then close the breaker when the synchroscope needle passes 12 o'clock.
+// The island's own rotation is fixed (it started the booth-door motor forwards); after the storm repair the
+// incoming grid cable at Q0 was re-terminated with L2/L3 swapped — the player has to spot and fix that.
+// Lamps are filaments: brightness ∝ V², practically dark below ~25 % voltage (so close on the scope, not the lamps).
 
 const SEQ = { CW: [0, -120, -240], CCW: [0, -240, -120] };   // L1, L2, L3 phase angles
 const rad = (d) => d * Math.PI / 180;
 const wrap = (d) => ((d + 180) % 360 + 360) % 360 - 180;
 
-export const SYNC_TOL = { V: 5, F: 0.1, PHI: 12 };
+export const SYNC_TOL = { V_REL: 0.02, F: 0.1, PHI: 10 };
 
 export class SyncSim {
   constructor(puzzle) {
-    this.grid = { V: puzzle.gridV, f: puzzle.gridF, seq: 'CW' };
-    this.isl = { V: 222, f: 49.8, seq: 'CCW' };
+    this.grid = { V: puzzle.gridV, f: puzzle.gridF };
+    this.isl = { V: 222, f: 49.8 };
+    this.swapped = true;     // incomer terminals L2/L3 swapped at Q0
     this.phi = 140;          // island angle relative to grid, degrees
     this.closed = false;
     this.flash = 0;
   }
-  serialize() { return { isl: this.isl, closed: this.closed }; }
-  restore(o) { if (o) { Object.assign(this.isl, o.isl); this.closed = o.closed; } }
+  serialize() { return { isl: { V: this.isl.V, f: this.isl.f }, swapped: this.swapped, closed: this.closed }; }
+  restore(o) {
+    if (!o) return;
+    this.isl.V = o.isl.V; this.isl.f = o.isl.f; this.closed = o.closed;
+    this.swapped = o.swapped ?? (o.isl.seq ? o.isl.seq !== 'CW' : true);   // older saves stored an island rotation
+  }
 
   tick(dt) {
     if (this.closed) { this.phi = 0; return; }
     this.phi = wrap(this.phi + 360 * (this.isl.f - this.grid.f) * dt);
     this.flash = Math.max(0, this.flash - dt);
   }
-  /** Voltage across each breaker pole → lamp brightness 0..1. */
+  /** Voltage across each breaker pole → filament lamp brightness 0..1. */
   lamps() {
     if (this.closed) return [0, 0, 0];
-    const gi = SEQ[this.grid.seq], ii = SEQ[this.isl.seq];
+    const gi = SEQ[this.swapped ? 'CCW' : 'CW'], ii = SEQ.CW;
     return [0, 1, 2].map((k) => {
       const a = rad(this.phi + ii[k] - gi[k]);
       const u = Math.sqrt(this.isl.V ** 2 + this.grid.V ** 2 - 2 * this.isl.V * this.grid.V * Math.cos(a));
-      return Math.min(1, u / (2 * 230));
+      const v = Math.min(1, u / (2 * 230));
+      return Math.max(0, (v * v - 0.0625) / 0.9375);
     });
   }
   check() {
     const dV = this.isl.V - this.grid.V, dF = this.isl.f - this.grid.f;
-    if (this.isl.seq !== this.grid.seq) return { ok: false, why: 'PHASE ROTATION MISMATCH — negative-sequence protection tripped. The lamps were chasing each other, not going dark together.' };
-    if (Math.abs(dV) > SYNC_TOL.V) return { ok: false, why: `VOLTAGE MISMATCH ${dV > 0 ? '+' : ''}${dV.toFixed(0)} V — reactive-power surge, breaker tripped.` };
-    if (Math.abs(dF) > SYNC_TOL.F) return { ok: false, why: `SLIP TOO LARGE (${dF > 0 ? '+' : ''}${dF.toFixed(2)} Hz) — power swing, breaker tripped.` };
-    if (Math.abs(this.phi) > SYNC_TOL.PHI) return { ok: false, why: `OUT OF PHASE by ${Math.abs(this.phi).toFixed(0)}° — the generators got yanked into step. BANG. Breaker tripped.` };
+    if (this.swapped) return { ok: false, why: 'PHASE ROTATION MISMATCH — the incomer arrives as L1-L3-L2. Two poles closed onto 400 V: the inverters hit their current limit within milliseconds and Q0 tripped. (The lamps were chasing each other instead of going dark together.)' };
+    if (Math.abs(dV) > SYNC_TOL.V_REL * this.grid.V) return { ok: false, why: `VOLTAGE MISMATCH ${dV > 0 ? '+' : ''}${dV.toFixed(0)} V — a reactive-current surge drove the island inverters into current limit; Q0 tripped.` };
+    if (Math.abs(dF) > SYNC_TOL.F) return { ok: false, why: `SLIP TOO LARGE (${dF > 0 ? '+' : ''}${dF.toFixed(2)} Hz) — the island inverters could not be pulled into step; overcurrent trip.` };
+    if (Math.abs(this.phi) > SYNC_TOL.PHI) return { ok: false, why: `OUT OF PHASE by ${Math.abs(this.phi).toFixed(0)}° — ${(460 * Math.sin(Math.abs(this.phi) * Math.PI / 360)).toFixed(0)} V across each pole, inverters at current limit, Q0 tripped instantly. BANG.` };
     return { ok: true };
   }
 }
@@ -89,15 +98,14 @@ export function drawSyncScope(ctx, w, h, sync, { compact = false } = {}) {
     ['', 'GRID', 'ISLAND'],
     ['V', `${sync.grid.V} V`, `${sync.isl.V} V`],
     ['f', `${sync.grid.f.toFixed(2)} Hz`, `${sync.isl.f.toFixed(2)} Hz`],
-    ['↻', sync.grid.seq === 'CW' ? 'L1-L2-L3' : 'L1-L3-L2', sync.isl.seq === 'CW' ? 'L1-L2-L3' : 'L1-L3-L2'],
   ];
   rows.forEach((r, i) => {
     const y = h * 0.34 + i * h * 0.1;
     ctx.fillStyle = '#8ea3b8'; ctx.fillText(r[0], w * 0.58, y);
     ctx.fillStyle = i === 0 ? '#8ea3b8' : '#e6edf3'; ctx.fillText(r[1], w * 0.63, y); ctx.fillText(r[2], w * 0.81, y);
   });
-  const ok = (c) => (c ? '#3ecf7a' : '#ff6b77');
-  ctx.fillStyle = ok(Math.abs(dV) <= SYNC_TOL.V); ctx.fillText(`ΔV ${dV >= 0 ? '+' : ''}${dV} V`, w * 0.58, h * 0.8);
-  ctx.fillStyle = ok(Math.abs(dF) <= SYNC_TOL.F); ctx.fillText(`Δf ${dF >= 0 ? '+' : ''}${dF.toFixed(2)} Hz`, w * 0.8, h * 0.8);
+  // plain differences, no pass/fail colouring: the checklist says what is acceptable
+  ctx.fillStyle = '#c8d4e0'; ctx.fillText(`ΔV ${dV >= 0 ? '+' : ''}${dV} V`, w * 0.58, h * 0.7);
+  ctx.fillText(`Δf ${dF >= 0 ? '+' : ''}${dF.toFixed(2)} Hz`, w * 0.8, h * 0.7);
   ctx.fillStyle = sync.closed ? '#3ecf7a' : '#ffd24a'; ctx.fillText(sync.closed ? 'Q0 CLOSED — CONNECTED' : `Δφ ${sync.phi >= 0 ? '+' : ''}${sync.phi.toFixed(0)}°`, w * 0.58, h * 0.92);
 }
