@@ -1,4 +1,5 @@
 // Narrative content. Everything that depends on the puzzle seed takes the puzzle config `P`.
+import { CFG } from './gridgame.js';
 
 export const INTRO = {
   title: '⚡ POWER LAB ESCAPE',
@@ -59,7 +60,7 @@ export function emails(P) {
     },
     {
       from: 'dispatch@tso-grid.example', subj: 'RE: Reconnection after outage — procedure',
-      body: `Hello Solar Test Laboratory,\nafter the storm outage, reconnection of your site requires:\n  1) a validated day-ahead dispatch schedule (gridctl, ≥ ${Math.round(0.55 * 100)} % of the optimum),\n  2) manual synchronisation at your tie breaker Q0.\nOur side: ${P.gridV} V, ${P.gridF.toFixed(2)} Hz, rotation L1-L2-L3 (clockwise) at the substation.\nNB: our storm crew re-terminated your incomer cable at Q0 tonight in a hurry — check the phase rotation before closing.\nThe reconnection permit card is issued automatically once the schedule is validated.\n— Grid Dispatch`,
+      body: `Hello Solar Test Laboratory,\nafter the storm outage, reconnection of your site requires:\n  1) a validated day-ahead dispatch schedule (gridctl: ≥ ${Math.round(CFG.WIN_RATIO * 100)} % of the extra profit\n     a perfect-foresight plan makes over doing nothing),\n  2) manual synchronisation at your tie breaker Q0.\nOur side: ${P.gridV} V, ${P.gridF.toFixed(2)} Hz, rotation L1-L2-L3 (clockwise) at the substation.\nNB: our storm crew re-terminated your incomer cable at Q0 tonight in a hurry — check the phase rotation before closing.\nThe reconnection permit card is issued automatically once the schedule is validated.\n— Grid Dispatch`,
     },
     {
       from: 'marco.volta@solarlab.example', subj: 'Out of office',

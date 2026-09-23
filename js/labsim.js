@@ -208,7 +208,7 @@ export class LabSim {
       controls: () => s.sun.unlocked
         ? `<div class="ctl"><label>Lamp array</label>${onoff('sun', s.sun.on)}</div>
            <p class="note">Xenon arc lamps giving 3 suns (3000 W/m²) on the test rig. Lamp input ≈ ${C.LAMP_KW} kW from the building's emergency generator ("temporarily" — M.V.). Lamp → light → PV → AC is only ≈ 9 % efficient.</p>`
-        : `<p class="note">SYSTEM LOCKED — enter 4-digit PIN. (Number keys work too.)</p>
+        : `<p class="note">SYSTEM LOCKED — enter 4-digit PIN.<span class="kbd-hint"> (Number keys work too.)</span></p>
            <div class="keypad">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => `<button class="btn" data-act="pin:${d}">${d}</button>`).join('')}
            <button class="btn warn" data-act="pin:C">C</button><button class="btn" data-act="pin:0">0</button><button class="btn on" data-act="pin:OK">OK</button></div>`,
       live: () => s.sun.unlocked

@@ -25,6 +25,17 @@ export function redraw(tex, draw) {
   tex.needsUpdate = true;
 }
 
+/** Shrink the current ctx.font (keeping family/weight) until `text` fits into maxW pixels. */
+export function fitFont(ctx, text, maxW) {
+  const m = /(\d+(?:\.\d+)?)px/.exec(ctx.font);
+  if (!m) return;
+  let size = Number(m[1]);
+  while (size > 8 && ctx.measureText(text).width > maxW) {
+    size -= 1;
+    ctx.font = ctx.font.replace(/\d+(?:\.\d+)?px/, `${size}px`);
+  }
+}
+
 /** Simple sign/label: array of lines, each either a string or {t, font, color}. */
 export function labelTex(lines, { w = 512, h = 256, bg = '#f2f2ee', fg = '#111', font = `bold 44px ${FONT.sans}`, border = null, align = 'center' } = {}) {
   return canvasTex(w, h, (ctx) => {
@@ -35,6 +46,7 @@ export function labelTex(lines, { w = 512, h = 256, bg = '#f2f2ee', fg = '#111',
     lines.forEach((l, i) => {
       const o = typeof l === 'string' ? { t: l } : l;
       ctx.font = o.font || font; ctx.fillStyle = o.color || fg;
+      fitFont(ctx, o.t, w - (border ? 44 : 28));        // never clip: shrink the font until the line fits
       ctx.fillText(o.t, align === 'center' ? w / 2 : 24, step * (i + 1));
     });
   });

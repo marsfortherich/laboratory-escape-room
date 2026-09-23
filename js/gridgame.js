@@ -278,7 +278,7 @@ export class GridGame {
           <div class="preview" id="gPrev"></div>
           <div class="note" id="gTip" style="margin-bottom:10px"></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn big" id="gRun" style="margin:0;flex:1">Run hour ▶ <span style="font-size:12px">(Enter)</span></button>
+            <button class="btn big" id="gRun" style="margin:0;flex:1">Run hour ▶ <span class="kbd-hint" style="font-size:12px">(Enter)</span></button>
             <button class="btn" id="gRun3" title="Run 3 hours with these setpoints">▶▶ 3 h</button>
             <button class="btn" id="gZero">Zero</button>
           </div>

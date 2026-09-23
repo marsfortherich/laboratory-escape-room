@@ -239,14 +239,17 @@ export class Terminal {
     return {
       help: () => this.print(
 `Commands:
-  ls [-a] [path]        list directory          cd <path>       change directory
-  cat <file>            print file              pwd / whoami    where / who am I
-  su <user>             switch user             exit            leave user / close
-  decode <file> <n>     Caesar-decode a file (shift letters back by n)
-  scada [status|diag]   SCADA tools (group scada)
-  mail [n]              read mail (mvolta)
-  gridctl               grid reconnection console (root only)
-  clear  history  hint`),
+  ls [-a] [path]     list a directory
+  cd <path>          change directory
+  cat <file>         print a file
+  pwd / whoami       where am I / who am I
+  su <user>          switch user
+  exit               leave user / close
+  decode <file> <n>  Caesar-decode (shift back by n)
+  scada status|diag  SCADA tools (group scada)
+  mail [n]           read mail (mvolta)
+  gridctl            grid console (root only)
+  clear · history · hint`),
       ls: (a) => {
         const all = a.some((x) => /^-\w*a/.test(x));
         const target = a.find((x) => !x.startsWith('-'));

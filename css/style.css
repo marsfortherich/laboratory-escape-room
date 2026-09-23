@@ -37,7 +37,7 @@ kbd { display: inline-block; min-width: 22px; padding: 1px 6px; margin: 0 2px; b
 #crosshair { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%;
   background: #fff; box-shadow: 0 0 3px #000; opacity: .85; transition: all .1s; }
 #crosshair.active { width: 18px; height: 18px; margin: -9px 0 0 -9px; background: transparent; border: 2px solid #ffd24a; }
-#prompt { position: absolute; left: 50%; top: calc(50% + 22px); transform: translateX(-50%); background: rgba(0,0,0,.7);
+#prompt { position: absolute; left: 50%; top: calc(50% + 110px); transform: translateX(-50%); background: rgba(0,0,0,.7);
   padding: 4px 12px; border-radius: 4px; font-size: 14px; white-space: nowrap; display: none; }
 #prompt b { color: #ffd24a; }
 #objective { position: absolute; left: 16px; bottom: 40px; max-width: 480px; background: rgba(10,16,24,.8);
@@ -236,4 +236,5 @@ canvas { touch-action: none; }
   .legend { display: none; }
 }
 @media (pointer: coarse) { #keys { display: none; } }
+body.touch .kbd-hint { display: none; }
 @media (prefers-reduced-motion: reduce) { #jBadge.new, #timer.pen { animation: none; } }

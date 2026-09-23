@@ -203,6 +203,7 @@ grid.onClose = () => closeOverlay();
 grid.onHint = (firstToday) => { if (firstToday) G.hints.used++; penalty(15, 'advisor consulted'); };
 
 const touchMode = isTouchDevice();
+document.body.classList.toggle('touch', touchMode);
 touch = new TouchControls(canvas, {
   look: (dx, dy) => { if (G.mode === 'play') look(dx * 1.6, dy * 1.6); },
   tap: (x, y) => { if (G.mode === 'play') tapInteract(x, y); },
@@ -291,7 +292,7 @@ function propPanel(id) {
     title: 'Bench drawer · 4-wheel combination lock',
     controls: () => (G.drawer.open
       ? (G.drawer.taken ? '<p>Empty — cable ties, a multimeter fuse and half a cookie.</p>' : '<p>Inside: the missing <b>handwheel</b> of the H₂ valve.</p><button class="btn on" data-act="take">Take the handwheel</button>')
-      : `<p class="note">Four number wheels. (You can also type the digits and press Enter.)</p>
+      : `<p class="note">Four number wheels.<span class="kbd-hint"> (You can also type the digits and press Enter.)</span></p>
         <div class="wheels">${G.drawer.code.map((d, i) => `<div class="wheel"><button class="btn" data-act="dw:${i}:1" aria-label="wheel ${i + 1} up">▲</button><div class="digit">${d}</div><button class="btn" data-act="dw:${i}:-1" aria-label="wheel ${i + 1} down">▼</button></div>`).join('')}</div>
         <button class="btn on" data-act="dopen">Pull the drawer</button>`),
     onAct: (a) => {
@@ -315,7 +316,7 @@ function propPanel(id) {
   };
   D.colorcode = {
     title: 'Resistor colour code (poster)',
-    controls: () => `<table class="phase-table"><tr><th>Colour</th><th>Digit</th><th>Multiplier</th></tr>${RES_COLORS.map((n, i) => `<tr><td><i class="sw" style="background:${RES_HEX[i]}"></i> ${n}</td><td>${i}</td><td>× 10${'⁰¹²³⁴⁵⁶⁷⁸⁹'[i]}</td></tr>`).join('')}</table>
+    controls: () => `<table class="phase-table"><tr><th>Colour</th><th>Digit</th><th>Multiplier</th></tr>${RES_COLORS.map((n, i) => `<tr><td><i class="sw" style="background:${RES_HEX[i]}"></i> ${n}</td><td>${i}</td><td>× 10${'⁰¹²³⁴⁵⁶⁷⁸⁹'[i]}</td></tr>`).join('')}<tr><td><i class="sw" style="background:#c8a040"></i> gold</td><td>—</td><td>tolerance ±5 %</td></tr></table>
       <p class="note">4-band resistor: digit, digit, multiplier, tolerance (gold ±5 %).</p>`,
     onOpen: () => note('colorcode', 'Resistor colour code', 'digit · digit · ×10ⁿ · tolerance — black 0, brown 1, red 2, orange 3, yellow 4, green 5, blue 6, violet 7, grey 8, white 9.'),
   };
@@ -353,7 +354,7 @@ function propPanel(id) {
     controls: () => `<img class="circuit-img" src="${circuitImg()}" alt="Logic circuit">
       <div class="seg" style="margin:10px 0">${'ABCD'.split('').map((n, i) => `<button class="btn tog ${G.board.bits[i] ? 'on' : ''}" data-act="bt:${i}" ${G.board.solved ? 'disabled' : ''}>${n} = ${G.board.bits[i]}</button>`).join('')}
       <button class="btn big" data-act="btest" style="margin:0 0 0 8px" ${G.board.solved ? 'disabled' : ''}>TEST</button></div>
-      <p class="note">Keys 1–4 toggle A–D, Enter tests. A wrong TEST trips the security alarm (+0:30).</p>`,
+      <p class="note"><span class="kbd-hint">Keys 1–4 toggle A–D, Enter tests. </span>A wrong TEST trips the security alarm (+0:30).</p>`,
     live: () => (G.board.solved ? lcd(`OUT = 1  ✔\nDISPLAY: ${P.f3}   (fragment 3)`) : lcd(`OUT = ?   inputs ${G.board.bits.join(' ')}`)),
     onAct: (a) => {
       const [k, i] = a.split(':');
@@ -373,13 +374,14 @@ function propPanel(id) {
   D.sync = {
     title: 'Grid tie panel · breaker Q0',
     controls: () => `<canvas id="syncCv" class="synccv" width="720" height="420"></canvas>
+      ${!sync.closed && !sync.islandOn ? lcd('ISLAND BUS DEAD — the lab cluster has no voltage. Energise it again in the booth (e.g. PV on INV-1).', true) : ''}
       ${sync.closed ? lcd('Q0 CLOSED — the lab is connected to the grid ✔')
         : !grid.permit ? lcd('Q0 INTERLOCKED — no reconnection permit from the grid operator yet (gridctl).', true)
           : !G.permitIn ? `${lcd('Q0 INTERLOCKED — insert the operator\'s permit card.', true)}<button class="btn on" data-act="permit">🪪 Insert the permit card</button>` : lcd('Permit card accepted — interlock released.')}
       <div class="ctl"><label>Island voltage</label><div class="seg">${[-5, -1, 1, 5].map((v) => `<button class="btn" data-act="sv:${v}">${v > 0 ? '+' : '−'}${Math.abs(v)} V</button>`).join('')}</div></div>
       <div class="ctl"><label>Island frequency</label><div class="seg">${[-0.1, -0.01, 0.01, 0.1].map((v) => `<button class="btn" data-act="sf:${v}">${v > 0 ? '+' : '−'}${Math.abs(v)} Hz</button>`).join('')}</div></div>
       <div class="ctl"><label>Incomer terminals</label><div class="seg"><button class="btn" data-act="swap">⇄ Swap L2 ↔ L3</button></div><span class="note">jumper position ${sync.swapped ? 'A (as found after the storm repair)' : 'B (L2 ↔ L3 crossed)'}</span></div>
-      ${sync.closed ? '' : '<button class="btn big danger" data-act="sclose" style="margin-top:4px">CLOSE Q0 <span style="font-size:12px">(Space)</span></button>'}`,
+      ${sync.closed ? '' : '<button class="btn big danger" data-act="sclose" style="margin-top:4px">CLOSE Q0 <span class="kbd-hint" style="font-size:12px">(Space)</span></button>'}`,
     anim: () => { const cv = $('syncCv'); if (cv) drawSyncScope(cv.getContext('2d'), cv.width, cv.height, sync); },
     onAct: (a) => {
       const [k, v] = a.split(':');
@@ -404,6 +406,7 @@ function propPanel(id) {
 function playMemo() { for (let i = 0; i < 9; i++) sound.beep(140 + Math.random() * 120, 0.09, 'triangle', 0.05, i * 0.11); }
 
 function closeTie() {
+  if (!sync.closed && !sync.islandOn) { sound.bad(); toast('Q0 refuses: the island bus is dead — energise the lab cluster first.', 'bad'); return; }
   if (!grid.permit || !G.permitIn) { sound.bad(); toast(grid.permit ? 'Q0 is interlocked: insert the permit card first.' : 'Q0 is interlocked: no reconnection permit yet (gridctl).', 'bad'); return; }
   const r = sync.check();
   if (r.ok) {
@@ -811,7 +814,7 @@ function drawScreens() {
       ctx.font = `24px ${FONT.mono}`;
       const synced = G.stage === 'synced' || G.stage === 'won';
       const rows = [
-        ['Public grid', synced ? 'CONNECTED ✔' : 'LOST (storm)'], ['PV (CPV rig)', `${f.pv.toFixed(2)} kW`], ['Battery', `${(s.bat.soc * 100).toFixed(0)} % SOC`],
+        ['Public grid', synced ? 'CONNECTED ✔' : 'LOST (storm)'], ['PV (test rig)', `${f.pv.toFixed(2)} kW`], ['Battery', `${(s.bat.soc * 100).toFixed(0)} % SOC`],
         ['H₂ tank', `${(s.h2.level * C.H2_KG * 1000).toFixed(0)} g`], ['Fuel cell', s.fc.running ? 'RUNNING' : 'STOPPED'],
         ['Reconnection', synced ? 'DONE' : G.stage === 'permit' ? 'PERMIT ✔ — sync Q0' : 'root required'],
       ];
@@ -833,7 +836,7 @@ function updateHud() {
       `<div class="row"><span>Battery</span><span>${(s.bat.soc * 100).toFixed(0)} %</span></div><div class="row"><span>H₂ tank</span><span>${(s.h2.level * C.H2_KG * 1000).toFixed(0)} g</span></div>`;
   }
   const left = TIME_LIMIT - totalTime();
-  ui.timer.innerHTML = `⏱ ${left >= 0 ? mmss(left) : '<span class="bad">' + mmss(left) + '</span>'} <span class="sub">${left >= 0 ? 'emergency light' : 'overtime'}</span>`;
+  ui.timer.innerHTML = `⏱ ${left >= 0 ? mmss(left) : '<span class="bad">' + mmss(left) + '</span>'} <span class="sub">${G.stage === 'synced' || G.stage === 'won' ? 'grid restored' : left >= 0 ? 'emergency light' : 'overtime'}</span>`;
 }
 
 // ============================================================ audio mix
@@ -973,9 +976,10 @@ function win() {
 let last = performance.now(), hudTimer = 0, saveTimer = 5, doorWasOpen = sim.s.door.state === 'open';
 function loop(now) {
   const dt = Math.min(0.1, (now - last) / 1000); last = now;
-  const running = !['start', 'menu', 'end'].includes(G.mode);
+  const running = ['play', 'panel', 'terminal', 'grid', 'hint', 'journal'].includes(G.mode);   // not before "Click to play", not in the menu
   if (running) {
     sim.tick(dt);
+    sync.islandOn = sim.s.grid || sim.f.live.some(Boolean);   // the cluster must be energised to synchronise
     sync.tick(dt);
     if (G.stage !== 'won') G.time.elapsed += dt;
   }

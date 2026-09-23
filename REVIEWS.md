@@ -92,3 +92,22 @@ What the reviewers confirmed in v2:
 | 🎮 A hint or the journal opened from the terminal dropped you back into the 3D world | Overlays return to the terminal or console you came from. |
 | 🎮 A door collider switching back on could trap the player | Colliders the player already overlaps are ignored. |
 | 🎮 The Esc that unlocks the pointer might also close the menu | Esc is debounced for 200 ms after the menu opens. |
+
+## QA pass (v2.2)
+
+A QA agent then played the live build visually. It took screenshots from player positions, compared frames for flicker, logged every canvas text draw, and checked every clue against its solution in the classic room and a daily room. The owner's three reports were confirmed and fixed along with everything else it found:
+
+| Finding | Fix |
+|---|---|
+| **Plaque** "SOLAR TEST LABORATORY" clipped (the text was 556 px wide on a 512 px canvas). "MAIN BUS 3~ 230/400 V" and "🏃 EXIT" were clipped too | `labelTex` now shrinks any line to fit (`fitFont`) |
+| **Resistor didn't match the drawer code.** The model was mirrored for a player facing the bench (gold·red·violet·yellow), gold was nearer its end, gold rendered black, and the note was tilted away | Bands now read yellow·violet·red · gap · gold from left to right. Band 1 is nearest its end, the colours glow slightly so they're readable in emergency light, and the note is tilted up and readable |
+| **Grid-status wall screen flickered** (its plane was coplanar with the frame, so it z-fought) | The screen sits 1.5 cm in front of its frame. The bus glass, logic-board decals and floor hazard strips were also moved off coplanar faces |
+| The timer ran before "Click to play" | The clock and simulation only run during actual play |
+| Hole in the floor at the exit doorway; the exit door said "CONTROL ROOM"; the CONTROL ROOM sign was on the wrong side | The corridor floor and ceiling now reach the door. The exit door has its own EXIT texture, and the sign faces into the booth |
+| A conduit covered the MAIN BUS sign; the tie-panel sign floated; the H₂ label, "NO WHEEL" tag and sight glass floated; the PV sign was washed out by the lamp cone | All moved or attached: a curved tank label, a tag hanging from the spindle, a sight glass with foot and brackets, the sign moved beside the rig |
+| The plaque and gold band rendered near-black (metal without an environment map) | Lower metalness |
+| The sync panel showed island voltage with every inverter off | The island is shown as dead ("— V"), the needle stops and Q0 refuses to close until the lab cluster is energised again |
+| Text inconsistencies ("CPV rig", e-mail wording "of the optimum", poster without a gold row, "EMERGENCY LIGHT" after resync) | Unified: the e-mail uses `CFG.WIN_RATIO` and the same wording as gridctl, the gold tolerance row was added, the timer shows "grid restored" |
+| The interaction prompt covered the aim point; mobile: 9 px scope text, broken `help` columns, keyboard hints on touch | Prompt moved lower, larger scope text, single-column `help`, keyboard-only hints hidden on touch devices |
+
+Every clue matched its solution in both rooms: plaque year and PIN, lamp count and Caesar shift, DIAG LEDs and the binary value, circuit poster and board, collar tag and password, e-mail values and sync panel, checklist and code tolerances.

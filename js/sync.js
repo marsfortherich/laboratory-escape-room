@@ -17,6 +17,7 @@ export class SyncSim {
     this.grid = { V: puzzle.gridV, f: puzzle.gridF };
     this.isl = { V: 222, f: 49.8 };
     this.swapped = true;     // incomer terminals L2/L3 swapped at Q0
+    this.islandOn = true;    // set by the game each frame: is the lab cluster energised?
     this.phi = 140;          // island angle relative to grid, degrees
     this.closed = false;
     this.flash = 0;
@@ -30,22 +31,25 @@ export class SyncSim {
 
   tick(dt) {
     if (this.closed) { this.phi = 0; return; }
-    this.phi = wrap(this.phi + 360 * (this.isl.f - this.grid.f) * dt);
     this.flash = Math.max(0, this.flash - dt);
+    if (!this.islandOn) return;                     // no island voltage → the synchroscope needle stands still
+    this.phi = wrap(this.phi + 360 * (this.isl.f - this.grid.f) * dt);
   }
   /** Voltage across each breaker pole → filament lamp brightness 0..1. */
   lamps() {
     if (this.closed) return [0, 0, 0];
     const gi = SEQ[this.swapped ? 'CCW' : 'CW'], ii = SEQ.CW;
+    const Vi = this.islandOn ? this.isl.V : 0;      // dead island: each lamp just sees the grid voltage (steady glow)
     return [0, 1, 2].map((k) => {
       const a = rad(this.phi + ii[k] - gi[k]);
-      const u = Math.sqrt(this.isl.V ** 2 + this.grid.V ** 2 - 2 * this.isl.V * this.grid.V * Math.cos(a));
+      const u = Math.sqrt(Vi ** 2 + this.grid.V ** 2 - 2 * Vi * this.grid.V * Math.cos(a));
       const v = Math.min(1, u / (2 * 230));
       return Math.max(0, (v * v - 0.0625) / 0.9375);
     });
   }
   check() {
     const dV = this.isl.V - this.grid.V, dF = this.isl.f - this.grid.f;
+    if (!this.islandOn) return { ok: false, why: 'NO ISLAND VOLTAGE — Q0 cannot synchronise a dead bus. Energise the lab cluster first.' };
     if (this.swapped) return { ok: false, why: 'PHASE ROTATION MISMATCH — the incomer arrives as L1-L3-L2. Two poles closed onto 400 V: the inverters hit their current limit within milliseconds and Q0 tripped. (The lamps were chasing each other instead of going dark together.)' };
     if (Math.abs(dV) > SYNC_TOL.V_REL * this.grid.V) return { ok: false, why: `VOLTAGE MISMATCH ${dV > 0 ? '+' : ''}${dV.toFixed(0)} V — a reactive-current surge drove the island inverters into current limit; Q0 tripped.` };
     if (Math.abs(dF) > SYNC_TOL.F) return { ok: false, why: `SLIP TOO LARGE (${dF > 0 ? '+' : ''}${dF.toFixed(2)} Hz) — the island inverters could not be pulled into step; overcurrent trip.` };
@@ -92,20 +96,20 @@ export function drawSyncScope(ctx, w, h, sync, { compact = false } = {}) {
   });
   if (compact) return;
   // meters
-  ctx.textAlign = 'left'; ctx.font = `${Math.round(h * 0.05)}px ${mono}`;
+  ctx.textAlign = 'left'; ctx.font = `${Math.round(h * 0.062)}px ${mono}`;
   const dV = sync.isl.V - sync.grid.V, dF = sync.isl.f - sync.grid.f;
   const rows = [
     ['', 'GRID', 'ISLAND'],
-    ['V', `${sync.grid.V} V`, `${sync.isl.V} V`],
-    ['f', `${sync.grid.f.toFixed(2)} Hz`, `${sync.isl.f.toFixed(2)} Hz`],
+    ['V', `${sync.grid.V} V`, sync.islandOn ? `${sync.isl.V} V` : '— V'],
+    ['f', `${sync.grid.f.toFixed(2)} Hz`, sync.islandOn ? `${sync.isl.f.toFixed(2)} Hz` : '— Hz'],
   ];
   rows.forEach((r, i) => {
-    const y = h * 0.34 + i * h * 0.1;
-    ctx.fillStyle = '#8ea3b8'; ctx.fillText(r[0], w * 0.58, y);
-    ctx.fillStyle = i === 0 ? '#8ea3b8' : '#e6edf3'; ctx.fillText(r[1], w * 0.63, y); ctx.fillText(r[2], w * 0.81, y);
+    const y = h * 0.34 + i * h * 0.11;
+    ctx.fillStyle = '#8ea3b8'; ctx.fillText(r[0], w * 0.56, y);
+    ctx.fillStyle = i === 0 ? '#8ea3b8' : '#e6edf3'; ctx.fillText(r[1], w * 0.6, y); ctx.fillText(r[2], w * 0.8, y);
   });
   // plain differences, no pass/fail colouring: the checklist says what is acceptable
-  ctx.fillStyle = '#c8d4e0'; ctx.fillText(`ΔV ${dV >= 0 ? '+' : ''}${dV} V`, w * 0.58, h * 0.7);
-  ctx.fillText(`Δf ${dF >= 0 ? '+' : ''}${dF.toFixed(2)} Hz`, w * 0.8, h * 0.7);
-  ctx.fillStyle = sync.closed ? '#3ecf7a' : '#ffd24a'; ctx.fillText(sync.closed ? 'Q0 CLOSED — CONNECTED' : `Δφ ${sync.phi >= 0 ? '+' : ''}${sync.phi.toFixed(0)}°`, w * 0.58, h * 0.92);
+  ctx.fillStyle = '#c8d4e0'; ctx.fillText(`ΔV ${dV >= 0 ? '+' : ''}${dV} V`, w * 0.56, h * 0.72);
+  ctx.fillText(`Δf ${dF >= 0 ? '+' : ''}${dF.toFixed(2)} Hz`, w * 0.78, h * 0.72);
+  ctx.fillStyle = sync.closed ? '#3ecf7a' : '#ffd24a'; ctx.fillText(sync.closed ? 'Q0 CLOSED — CONNECTED' : (sync.islandOn ? `Δφ ${sync.phi >= 0 ? '+' : ''}${sync.phi.toFixed(0)}°` : 'ISLAND BUS DEAD'), w * 0.56, h * 0.9);
 }

@@ -9,7 +9,7 @@
   <meta property="og:title" content="Power Lab Escape">
   <meta property="og:description" content="Power up a 3-phase island grid, hack the control PC, out-trade the market and synchronise with the grid to escape.">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="css/style.css?v=85243ee0e0">
+  <link rel="stylesheet" href="css/style.css?v=542c6a0d07">
   <!-- Only used in dev mode (index.html?dev — needs `npm install` and a local server): raw ES modules. -->
   <script type="importmap">
   { "imports": { "three": "./node_modules/three/build/three.module.js" } }
@@ -57,7 +57,7 @@
     <div class="panel-box">
       <div class="panel-head"><h2 id="panelTitle"></h2><button class="btn close" data-close aria-label="Close">✕</button></div>
       <div id="panelBody"></div>
-      <p class="note panel-foot">E / Esc to close</p>
+      <p class="note panel-foot kbd-hint">E / Esc to close</p>
     </div>
   </div>
 
@@ -105,7 +105,7 @@
     (function () {
       var s = document.createElement('script');
       if (/[?&]dev(=|&|$)/.test(location.search)) { s.type = 'module'; s.src = 'js/main.js'; }
-      else s.src = 'dist/game.js?v=85243ee0e0';
+      else s.src = 'dist/game.js?v=542c6a0d07';
       s.onerror = function () { document.body.insertAdjacentHTML('beforeend', '<div class="overlay"><div class="card">Could not load ' + s.src + '. Run <code>npm run build</code>.</div></div>'); };
       document.body.appendChild(s);
     })();

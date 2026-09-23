@@ -127,6 +127,9 @@ export function buildWorld(scene, P) {
   box(5.4, H, 0.2, M.wall, -3.5, H / 2, -5.1); col(-6.2, -0.8, -5.2, -5);
   box(5.4, H, 0.2, M.wall, 3.5, H / 2, -5.1); col(0.8, 6.2, -5.2, -5);
   box(1.6, H - 2.4, 0.2, M.wall, 0, 2.4 + (H - 2.4) / 2, -5.1);
+  // control-room face of that wall in the control-room colour
+  plane(4.2, H, M.ctrlWall, -2.9, H / 2, -5.205, '-z'); plane(4.2, H, M.ctrlWall, 2.9, H / 2, -5.205, '-z');
+  plane(1.6, H - 2.4, M.ctrlWall, 0, 2.4 + (H - 2.4) / 2, -5.205, '-z');
   // control room: west + back walls, east wall split around the exit door (z -8.8…-7.2)
   box(0.2, H, 8, M.ctrlWall, -5.1, H / 2, -9.2); col(-5.2, -5, -13.2, -5.2);
   box(10.4, H, 0.2, M.ctrlWall, 0, H / 2, -13.1); col(-5.2, 5.2, -13.2, -13);
@@ -134,8 +137,8 @@ export function buildWorld(scene, P) {
   box(0.2, H, 2.0, M.ctrlWall, 5.1, H / 2, -6.2); col(5, 5.2, -7.2, -5.2);
   box(0.2, H - 2.4, 1.6, M.ctrlWall, 5.1, 2.4 + (H - 2.4) / 2, -8.0);
   // exit corridor
-  plane(3.8, 1.6, ctrlFloor, 7.1, 0, -8, '+y');
-  plane(3.8, 1.6, M.ceil, 7.1, H, -8, '+y').rotation.x = Math.PI / 2;
+  plane(4.0, 1.6, ctrlFloor, 7.0, 0, -8, '+y');                        // starts at x = 5.0: no gap under the exit door
+  plane(4.0, 1.6, M.ceil, 7.0, H, -8, '+y').rotation.x = Math.PI / 2;
   box(3.8, H, 0.2, M.ctrlWall, 7.1, H / 2, -7.1); col(5.2, 9.2, -7.2, -7.0);
   box(3.8, H, 0.2, M.ctrlWall, 7.1, H / 2, -8.9); col(5.2, 9.2, -9.0, -8.8);
   refs.outsideMat = new THREE.MeshBasicMaterial({ map: skyTex(false) });
@@ -208,7 +211,7 @@ export function buildWorld(scene, P) {
   box(0.06, 0.5, 0.36, M.dark, -5.97, 1.45, 2.85, kp);
   plane(0.34, 0.48, screenMat(refs.keypadTex, 0.35), -5.935, 1.45, 2.85, '+x', kp);
   scene.add(kp); tag(kp, 'sunsim', 'Sun-simulator keypad');
-  plane(0.8, 0.4, texMat(labelTex(['PV TEST RIG', { t: 'Sun simulator · 3 suns', font: `30px ${FONT.sans}` }], { bg: '#1b3a6b', fg: '#fff' })), -5.99, 2.35, 0, '+x');
+  plane(0.8, 0.4, texMat(labelTex(['PV TEST RIG', { t: 'Sun simulator · 3 suns', font: `30px ${FONT.sans}` }], { bg: '#1b3a6b', fg: '#fff' })), -5.99, 2.0, -2.75, '+x');
 
   // ---------------------------------------------------------------- Battery cabinets (right wall)
   const batFront = canvasTex(256, 420, (ctx, w, h) => {
@@ -281,7 +284,7 @@ export function buildWorld(scene, P) {
     refs.breakers.push(box(0.06, 0.08, 0.06, std(0x2a2a2a), 5.49, 0.6, -3.3 + i * 0.3, bus));
   }
   const glass = new THREE.Mesh(new THREE.PlaneGeometry(1.75, 1.85), new THREE.MeshStandardMaterial({ color: 0xaaccee, transparent: true, opacity: 0.12, roughness: 0.05 }));
-  glass.position.set(5.5, 1.2, -2.9); glass.rotation.y = -Math.PI / 2; bus.add(glass);
+  glass.position.set(5.44, 1.2, -2.9); glass.rotation.y = -Math.PI / 2; bus.add(glass);
   scene.add(bus); tag(bus, 'bus', 'Main bus panel');
   plane(1.2, 0.3, texMat(labelTex(['MAIN BUS  3~ 230/400 V'], { w: 512, h: 128, bg: '#ffd200', fg: '#111', font: `bold 48px ${FONT.sans}` })), 5.99, 2.45, -2.9, '-x');
   plane(0.4, 0.4, texMat(canvasTex(256, 256, (ctx) => {
@@ -292,7 +295,7 @@ export function buildWorld(scene, P) {
   col(5.5, 6, -3.9, -1.9);
   box(0.35, 0.08, 7.8, M.metal, 5.75, 3.12, 0.4);
   box(10.8, 0.08, 0.35, M.metal, 0.4, 3.12, -4.75);
-  box(0.08, 0.9, 0.08, M.dark, 5.93, 2.65, -2.9);
+  box(0.08, 0.9, 0.08, M.dark, 5.93, 2.65, -3.75);
   // recorder on top of the battery cabinet
   refs.recorders = {};
   const recorder = (id, x, y, z, rotY = 0) => {
@@ -327,14 +330,21 @@ export function buildWorld(scene, P) {
   const tank = new THREE.Group();
   cyl(0.24, 1.3, M.white, -2.9, 0.75, -4.35, tank);
   const cap = new THREE.Mesh(new THREE.SphereGeometry(0.24, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), M.white); cap.position.set(-2.9, 1.4, -4.35); tank.add(cap);
-  plane(0.3, 0.3, texMat(labelTex([{ t: 'H₂', font: `bold 120px ${FONT.sans}`, color: '#c21' }, { t: '30 bar · 90 L', font: `36px ${FONT.sans}` }], { w: 256, h: 256, bg: '#ffffff' })), -2.9, 1.0, -4.105, '+z', tank);
+  const h2Lbl = new THREE.Mesh(new THREE.CylinderGeometry(0.243, 0.243, 0.3, 24, 1, true, -0.65, 1.3),
+    texMat(labelTex([{ t: 'H₂', font: `bold 120px ${FONT.sans}`, color: '#c21' }, { t: '30 bar · 90 L', font: `36px ${FONT.sans}` }], { w: 256, h: 256, bg: '#ffffff' })));
+  h2Lbl.position.set(-2.9, 1.0, -4.35); tank.add(h2Lbl);
   refs.valve = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.022, 8, 20), M.red);
   refs.valve.position.set(-2.9, 0.45, -3.98); refs.valve.visible = false; tank.add(refs.valve);
   cyl(0.02, 0.14, M.metal, -2.9, 0.45, -4.05, tank).rotation.x = Math.PI / 2;
-  refs.valveTag = plane(0.12, 0.08, texMat(labelTex(['NO WHEEL', '— M.V.'], { w: 128, h: 96, bg: '#fff6c8', fg: '#b3261e', font: `bold 22px ${FONT.sans}` })), -2.78, 0.36, -3.975, '+z', tank);
-  cyl(0.05, 1.0, std(0xcce6ff, { transparent: true, opacity: 0.3 }), -2.52, 0.85, -4.15, tank);
-  refs.h2Bar = cyl(0.038, 0.96, glowMat(0x6fd0ff, 0.8), -2.52, 0.37, -4.15, tank);
-  refs.h2Bar.geometry.translate(0, 0.48, 0); refs.h2Bar.scale.y = 0.001;
+  refs.valveTag = new THREE.Group();
+  plane(0.1, 0.075, texMat(labelTex(['NO WHEEL', '— M.V.'], { w: 128, h: 96, bg: '#fff6c8', fg: '#b3261e', font: `bold 22px ${FONT.sans}` })), -2.9, 0.37, -3.985, '+z', refs.valveTag);
+  cyl(0.002, 0.045, M.dark, -2.9, 0.428, -3.985, refs.valveTag);   // string tied to the bare spindle
+  tank.add(refs.valveTag);
+  cyl(0.05, 1.3, std(0xcce6ff, { transparent: true, opacity: 0.3 }), -2.52, 0.75, -4.15, tank);
+  box(0.12, 0.1, 0.12, M.metal, -2.52, 0.05, -4.15, tank);                                  // foot
+  for (const y of [0.3, 1.2]) box(0.16, 0.03, 0.04, M.metal, -2.6, y, -4.18, tank);          // brackets to the tank
+  refs.h2Bar = cyl(0.038, 1.26, glowMat(0x6fd0ff, 0.8), -2.52, 0.12, -4.15, tank);
+  refs.h2Bar.geometry.translate(0, 0.63, 0); refs.h2Bar.scale.y = 0.001;
   scene.add(tank); tag(tank, 'h2tank', 'H₂ tank & valve');
   col(-3.2, -2.4, -4.7, -3.9);
   pipe([-3.9, 1.4, -4.35], [-3.14, 1.4, -4.35], 0.035, M.pipeY);
@@ -378,7 +388,7 @@ export function buildWorld(scene, P) {
   box(0.42, 0.52, 0.05, M.dark, -1.3, 1.45, -4.98, ds);
   plane(0.36, 0.45, screenMat(refs.doorScreenTex), -1.3, 1.45, -4.95, '+z', ds);
   scene.add(ds); tag(ds, 'door', 'Door drive controller');
-  for (const z of [-4.7, -5.45]) { const hz = hazardTex(); hz.repeat.set(3, 1); plane(1.6, 0.25, texMat(hz), 0, 0.005, z, '+y'); }
+  for (const z of [-4.7, -5.45]) { const hz = hazardTex(); hz.repeat.set(3, 1); plane(1.6, 0.25, texMat(hz), 0, 0.012, z, '+y'); }
 
   // ---------------------------------------------------------------- Whiteboard, plaque, workbench, drawer, resistor, colour-code poster
   const wbTex = canvasTex(1024, 512, (ctx, w, h) => {
@@ -396,8 +406,8 @@ export function buildWorld(scene, P) {
 
   const plaque = new THREE.Group();
   const plaqueTex = labelTex([{ t: 'SOLAR TEST LABORATORY', font: 'bold 38px Georgia, serif' }, { t: `EST. ${P.year}`, font: 'bold 64px Georgia, serif' }, { t: '"Power to the people."', font: 'italic 30px Georgia, serif' }], { w: 512, h: 300, bg: '#b8923a', fg: '#3b2a08', border: '#8a6a22' });
-  box(0.74, 0.44, 0.03, std(0x8a6a22, { metalness: 0.7 }), 2.6, 1.95, 4.98, plaque);
-  plane(0.7, 0.41, texMat(plaqueTex, { metalness: 0.5, roughness: 0.35 }), 2.6, 1.95, 4.96, '-z', plaque);
+  box(0.74, 0.44, 0.03, std(0x8a6a22, { metalness: 0.25, roughness: 0.5 }), 2.6, 1.95, 4.98, plaque);
+  plane(0.7, 0.41, texMat(plaqueTex, { metalness: 0.1, roughness: 0.45 }), 2.6, 1.95, 4.96, '-z', plaque);
   scene.add(plaque); tag(plaque, 'plaque', 'Brass plaque');
 
   box(2.4, 0.06, 0.8, M.wood, 2.6, 0.9, 4.55);
@@ -422,15 +432,18 @@ export function buildWorld(scene, P) {
   // display resistor with colour bands + tag
   const res = new THREE.Group();
   const rb = cyl(0.03, 0.2, std(0xe8d7b0), 0, 0, 0, res); rb.rotation.z = Math.PI / 2;
-  [-0.06, -0.025, 0.01].forEach((x, i) => { const bnd = cyl(0.032, 0.014, std(RES_HEX[P.bands[i]]), x, 0, 0, res); bnd.rotation.z = Math.PI / 2; });
-  const gold = cyl(0.032, 0.014, std(0xc8a040, { metalness: 0.8 }), 0.065, 0, 0, res); gold.rotation.z = Math.PI / 2;
+  // Player faces +z when looking at the bench, so +x is on their LEFT: band 1 sits at +x and reads left → right,
+  // the gold tolerance band is set apart on the right. A little emissive keeps the hues readable in emergency light.
+  const bandMat = (hex) => std(hex, { emissive: new THREE.Color(hex), emissiveIntensity: 0.25, roughness: 0.5 });
+  [0.075, 0.04, 0.005].forEach((x, i) => { const bnd = cyl(0.032, 0.018, bandMat(RES_HEX[P.bands[i]]), x, 0, 0, res); bnd.rotation.z = Math.PI / 2; });
+  const gold = cyl(0.032, 0.014, std(0xc8a040, { metalness: 0.2, roughness: 0.4, emissive: new THREE.Color(0xc8a040), emissiveIntensity: 0.15 }), -0.06, 0, 0, res); gold.rotation.z = Math.PI / 2;
   for (const s of [-1, 1]) { const lead = cyl(0.004, 0.1, M.alu, s * 0.15, 0, 0, res); lead.rotation.z = Math.PI / 2; }
-  plane(0.16, 0.08, texMat(labelTex(['DRAWER =', 'MY VALUE IN Ω'], { w: 256, h: 128, bg: '#fff6c8', fg: '#1b3f8f', font: `bold 30px ${FONT.sans}` })), 0, -0.03, -0.06, '-z', res).rotation.x = -0.4;
+  plane(0.16, 0.08, texMat(labelTex(['DRAWER =', 'MY VALUE IN Ω'], { w: 256, h: 128, bg: '#fff6c8', fg: '#1b3f8f', font: `bold 30px ${FONT.sans}` })), 0, 0.012, -0.07, '-z', res).rotation.x = 0.6;   // tilted up towards the player's eyes
   res.position.set(3.05, 0.97, 4.35); res.rotation.y = 0.15;
   scene.add(res); tag(res, 'resistor', 'Resistor with a sticky note');
   recorder('rec1', 1.55, 0.95, 4.35, 0.2);
   // colour-code poster on the back wall
-  const ccTex = canvasTex(512, 640, (ctx, w, h) => {
+  const ccTex = canvasTex(512, 700, (ctx, w, h) => {
     ctx.fillStyle = '#fbfaf5'; ctx.fillRect(0, 0, w, h);
     ctx.fillStyle = '#111'; ctx.font = `bold 34px ${FONT.sans}`; ctx.textAlign = 'center'; ctx.fillText('RESISTOR COLOUR CODE', w / 2, 48);
     ctx.font = `20px ${FONT.sans}`; ctx.fillText('band 1 · band 2 · multiplier ×10ⁿ · tolerance', w / 2, 80);
@@ -440,9 +453,11 @@ export function buildWorld(scene, P) {
       ctx.fillStyle = '#111'; ctx.textAlign = 'left'; ctx.font = `bold 26px ${FONT.sans}`;
       ctx.fillText(`${n}`, 150, y + 28); ctx.fillText(`${i}`, 300, y + 28); ctx.fillText(`×10${'⁰¹²³⁴⁵⁶⁷⁸⁹'[i]}`, 370, y + 28);
     });
+    ctx.fillStyle = '#c8a040'; ctx.fillRect(40, 610, 90, 38); ctx.strokeRect(40, 610, 90, 38);
+    ctx.fillStyle = '#111'; ctx.fillText('gold', 150, 638); ctx.fillText('—', 300, 638); ctx.fillText('±5 % (tol.)', 370, 638);
   });
   const cc = new THREE.Group();
-  plane(0.64, 0.8, texMat(ccTex), 4.6, 1.85, 4.985, '-z', cc);
+  plane(0.64, 0.875, texMat(ccTex), 4.6, 1.85, 4.985, '-z', cc);
   scene.add(cc); tag(cc, 'colorcode', 'Colour-code poster');
 
   // ---------------------------------------------------------------- Control room
@@ -468,7 +483,7 @@ export function buildWorld(scene, P) {
   const board = new THREE.Group();
   box(0.5, 0.02, 0.3, std(0x1d6b3a, { roughness: 0.5 }), 0, 0, 0, board);
   const pcbLbl = labelTex([{ t: 'FW-BOARD  A   B   C   D', font: `bold 30px ${FONT.mono}` }], { w: 512, h: 64, bg: '#1d6b3a', fg: '#e8f5e0' });
-  plane(0.46, 0.06, texMat(pcbLbl), 0, 0.011, 0.1, '+y', board);
+  plane(0.46, 0.06, texMat(pcbLbl), 0, 0.014, 0.1, '+y', board);
   refs.boardToggles = [];
   for (let i = 0; i < 4; i++) {
     const x = -0.02 + i * 0.06;
@@ -479,7 +494,7 @@ export function buildWorld(scene, P) {
   refs.boardLed = sph(0.014, glowMat(0x330000, 1), 0.2, 0.02, 0.05, board);
   refs.boardSegTex = canvasTex(128, 64, (ctx, w, h) => drawSevenSeg(ctx, w, h, '', false));
   box(0.16, 0.07, 0.02, std(0x111111), -0.14, 0.04, -0.1, board);
-  plane(0.14, 0.06, screenMat(refs.boardSegTex, 1), -0.14, 0.04, -0.089, '+z', board);
+  plane(0.14, 0.06, screenMat(refs.boardSegTex, 1), -0.14, 0.04, -0.086, '+z', board);
   board.position.set(-0.7, 0.8, -11.72);
   scene.add(board); tag(board, 'board', 'FW-BOARD logic board');
   // circuit poster (back wall, right of the monitor)
@@ -502,13 +517,13 @@ export function buildWorld(scene, P) {
   col(3.45, 4.35, -12.9, -11.9);
   // wall screen (left wall)
   refs.wallScreenTex = canvasTex(768, 400);
-  plane(3.0, 1.56, new THREE.MeshBasicMaterial({ map: refs.wallScreenTex }), -4.98, 1.9, -9.2, '+x');
+  plane(3.0, 1.56, new THREE.MeshBasicMaterial({ map: refs.wallScreenTex }), -4.965, 1.9, -9.2, '+x');   // 1.5 cm in front of the frame (no z-fighting)
   box(0.04, 1.66, 3.1, M.dark, -5.0, 1.9, -9.2);
   // window (back wall)
   refs.windowMat = new THREE.MeshBasicMaterial({ map: skyTex(false) });
   plane(3.4, 1.3, refs.windowMat, -2.3, 2.0, -12.98, '+z');
   box(3.5, 0.08, 0.1, M.alu, -2.3, 1.33, -12.95); box(3.5, 0.08, 0.1, M.alu, -2.3, 2.67, -12.95);
-  plane(1.2, 0.3, texMat(labelTex(['CONTROL ROOM'], { w: 512, h: 128, bg: '#1b2530', fg: '#ffd24a', font: `bold 60px ${FONT.sans}` })), 0, 2.9, -5.21, '-z');
+  plane(1.2, 0.26, texMat(labelTex(['CONTROL ROOM ▸'], { w: 592, h: 128, bg: '#1b2530', fg: '#ffd24a', font: `bold 60px ${FONT.sans}` })), 0, 2.93, -4.99, '+z');
 
   // ---------------------------------------------------------------- Tie panel (sync) + checklist + exit door (east wall)
   const sp = new THREE.Group();
@@ -517,7 +532,7 @@ export function buildWorld(scene, P) {
   plane(0.5, 0.5, screenMat(refs.syncTex, 0.9), 4.64, 1.45, -10.6, '-x', sp);
   refs.syncLamps = [-10.95, -10.6, -10.25].map((z) => sph(0.045, glowMat(0x552200, 0.2), 4.62, 1.86, z, sp));
   refs.syncHandle = box(0.06, 0.25, 0.08, M.red, 4.6, 0.85, -10.6, sp);
-  plane(1.0, 0.25, texMat(labelTex(['GRID TIE · Q0 · SYNC'], { w: 512, h: 128, bg: '#ffd200', fg: '#111', font: `bold 50px ${FONT.sans}` })), 4.64, 2.15, -10.6, '-x', sp);
+  plane(1.0, 0.25, texMat(labelTex(['GRID TIE · Q0 · SYNC'], { w: 512, h: 128, bg: '#ffd200', fg: '#111', font: `bold 50px ${FONT.sans}` })), 4.985, 2.25, -10.6, '-x', sp);
   scene.add(sp); tag(sp, 'sync', 'Grid tie panel (Q0)');
   col(4.6, 5.05, -11.3, -9.9);
   const ckTex = canvasTex(320, 400, (ctx, w, h) => {
@@ -530,7 +545,14 @@ export function buildWorld(scene, P) {
   const ck = new THREE.Group();
   plane(0.26, 0.32, texMat(ckTex), 4.985, 1.55, -11.7, '-x', ck);
   scene.add(ck); tag(ck, 'checklist', 'Sync checklist (pinned)');
-  refs.exitDoor = box(0.08, 2.4, 1.62, [texMat(doorTex, { metalness: 0.4 }), texMat(doorTex, { metalness: 0.4 }), M.metal, M.metal, M.metal, M.metal], 5.07, 1.2, -8.0);
+  const exitTex = canvasTex(256, 384, (ctx, w, h) => {
+    ctx.fillStyle = '#7d8790'; ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = '#5d666e'; ctx.lineWidth = 4; ctx.strokeRect(16, 16, w - 32, h - 32);
+    ctx.fillStyle = '#1b2530'; ctx.fillRect(70, 50, 116, 90);
+    ctx.fillStyle = '#0c7a35'; ctx.fillRect(16, 250, w - 32, 38);
+    ctx.fillStyle = '#fff'; ctx.font = `bold 22px ${FONT.sans}`; ctx.textAlign = 'center'; ctx.fillText('EXIT ▸ OUTSIDE', w / 2, 276);
+  });
+  refs.exitDoor = box(0.08, 2.4, 1.62, [texMat(exitTex, { metalness: 0.4 }), texMat(exitTex, { metalness: 0.4 }), M.metal, M.metal, M.metal, M.metal], 5.07, 1.2, -8.0);
   tag(refs.exitDoor, 'exit', 'Exit door');
   refs.exitCollider = col(4.95, 5.25, -8.85, -7.15);
   refs.exitLed = box(0.04, 0.06, 0.5, glowMat(0xff2020, 1.5), 4.98, 2.52, -8.0);
