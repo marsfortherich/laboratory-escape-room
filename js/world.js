@@ -1,8 +1,14 @@
 import * as THREE from 'three';
-import { canvasTex, labelTex, tileTex, pvCellTex, hazardTex, redraw, FONT } from './textures.js';
+import { canvasTex, labelTex, pvCellTex, hazardTex, FONT } from './textures.js';
 import { drawCircuit } from './schematic.js';
-import { RES_HEX } from './puzzle.js';
+import { RES_HEX, RES_MULT } from './puzzle.js';
 import { whiteboardLines } from './story.js';
+import { wallSurface, floorSurface, ceilingSurface, metalSurface, paintSurface, weather, blobShadowTexture, edgeShadowTexture } from './materials.js';
+import { drawDroplets, drawRunnels, OUT } from './cologne.js';
+import { OutsideView } from './outside.js';
+import { isTouchDevice } from './touch.js';
+import { buildDetails } from './details.js';
+import { buildCat } from './cat.js';
 
 // Layout (metres). Booth: x[-6,6] z[-5,5]. Control room: x[-5,5] z[-13,-5]. Booth door in wall z=-5, x[-0.8,0.8].
 // Exit door in the control-room east wall x=5, z[-8.8,-7.2] → corridor to the outside (x up to 9).
@@ -20,6 +26,7 @@ export function drawKeypad(ctx, w, h, unlocked) {
     ctx.fillStyle = '#222'; ctx.font = `bold 22px ${FONT.sans}`;
     ctx.fillText('123456789C0✓'[r * 3 + c], 64 + c * 64, 159 + r * 56);
   }
+  weather(ctx, w, h, 0.8, 3);
 }
 
 export function drawSevenSeg(ctx, w, h, text, on) {
@@ -27,34 +34,6 @@ export function drawSevenSeg(ctx, w, h, text, on) {
   ctx.fillStyle = on ? '#ff3b2f' : '#3a1210'; ctx.font = `bold ${h * 0.75}px ${FONT.mono}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(on ? text : '--', w / 2, h / 2 + 2);
   ctx.textBaseline = 'alphabetic';
-}
-
-function skyTex(dawn) {
-  return canvasTex(1024, 384, (ctx, w, h) => {
-    const g = ctx.createLinearGradient(0, 0, 0, h);
-    if (dawn) { g.addColorStop(0, '#2b4a7a'); g.addColorStop(0.55, '#f0a068'); g.addColorStop(1, '#ffd9a0'); }
-    else { g.addColorStop(0, '#03060f'); g.addColorStop(1, '#141c2c'); }
-    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
-    if (dawn) { const s = ctx.createRadialGradient(760, h - 70, 5, 760, h - 70, 120); s.addColorStop(0, 'rgba(255,240,200,1)'); s.addColorStop(1, 'rgba(255,200,120,0)'); ctx.fillStyle = s; ctx.fillRect(0, 0, w, h); }
-    let x = 0; let seed = 7;
-    const rnd = () => { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; };
-    while (x < w) {
-      const bw = 30 + rnd() * 70, bh = 60 + rnd() * 200;
-      ctx.fillStyle = dawn ? '#27283a' : '#070b12'; ctx.fillRect(x, h - bh, bw, bh);
-      for (let yy = h - bh + 10; yy < h - 10; yy += 16) for (let xx = x + 6; xx < x + bw - 8; xx += 12)
-        if (rnd() < (dawn ? 0.35 : 0.04)) { ctx.fillStyle = rnd() < 0.5 ? '#ffd27a' : '#9fc4ff'; ctx.fillRect(xx, yy, 5, 7); }
-      x += bw + 4;
-    }
-    ctx.strokeStyle = dawn ? '#3a3d52' : '#1b2230'; ctx.lineWidth = 2;
-    for (const tx of [820, 900, 960]) {
-      ctx.beginPath(); ctx.moveTo(tx, h - 150); ctx.lineTo(tx, h - 60); ctx.stroke();
-      for (let a = 0; a < 3; a++) { const an = a * 2.09 + tx; ctx.beginPath(); ctx.moveTo(tx, h - 150); ctx.lineTo(tx + Math.cos(an) * 34, h - 150 + Math.sin(an) * 34); ctx.stroke(); }
-    }
-    if (!dawn) {                         // rain streaks
-      ctx.strokeStyle = 'rgba(160,190,230,.22)'; ctx.lineWidth = 1;
-      for (let i = 0; i < 260; i++) { const rx = rnd() * w, ry = rnd() * h; ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx - 6, ry + 22); ctx.stroke(); }
-    }
-  });
 }
 
 export function buildWorld(scene, P) {
@@ -97,15 +76,28 @@ export function buildWorld(scene, P) {
   const noRay = (m) => { m.raycast = () => {}; return m; };
 
   // ---------------------------------------------------------------- materials
-  const floorTex = tileTex('#747a80', '#5c6166', 2); floorTex.repeat.set(6, 5);
+  // procedural, lived-in surfaces (see materials.js); every texture is a tileable patch repeated to real-world scale
+  const wallS = wallSurface({ base: [214, 218, 221], seed: 11 });
+  const ctrlS = wallSurface({ base: [86, 100, 118], seed: 23, grime: 0.8 });
+  const floorS = floorSurface({ seed: 5 });
+  const ctrlFloorS = floorSurface({ base: [70, 78, 90], grout: [42, 46, 52], seed: 9 });
+  const ceilS = ceilingSurface({ seed: 7 });
+  const metalS = metalSurface({ seed: 3 }), aluS = metalSurface({ base: [196, 202, 208], seed: 8 });
+  const paintS = paintSurface({ seed: 4 }), darkS = paintSurface({ base: [48, 53, 59], seed: 6 });
+  const rep = (t, x, y, oy = 0) => { const c = t.clone(); c.repeat.set(x, y); c.offset.set(0, oy); c.needsUpdate = true; return c; };
+  /** wall `len` m long and `hgt` m high; pieces hanging from the ceiling (lintels) show the top of the 3.5 m patch */
+  const wallMat = (S, len, hgt = H) => {
+    const ry = hgt / H, oy = 1 - ry;
+    return std(0xffffff, { map: rep(S.map, len / 3.5, ry, oy), bumpMap: rep(S.bump, len / 3.5, ry, oy), bumpScale: 0.7, roughness: 0.93 });
+  };
+  const floorMat = (S, w, d) => std(0xffffff, { map: rep(S.map, w / 2.4, d / 2.4), bumpMap: rep(S.bump, w / 2.4, d / 2.4), bumpScale: 1.5, roughnessMap: rep(S.rough, w / 2.4, d / 2.4), roughness: 1 });
+  const ceilMat = (w, d) => std(0xffffff, { map: rep(ceilS.map, w / 2.4, d / 2.4), roughness: 1 });
   const M = {
-    floor: std(0xffffff, { map: floorTex, roughness: 0.85 }),
-    wall: std(0xd7dbde, { roughness: 0.95 }),
-    ceil: std(0xb9bec2, { roughness: 1 }),
-    metal: std(0x9aa4ad, { metalness: 0.6, roughness: 0.35 }),
-    dark: std(0x2b3036, { roughness: 0.6 }),
-    white: std(0xeef1f3, { roughness: 0.5 }),
-    alu: std(0xc6ccd2, { metalness: 0.7, roughness: 0.3 }),
+    wall: wallMat(wallS, 3.5),
+    metal: std(0xffffff, { map: metalS.map, roughnessMap: metalS.rough, metalness: 0.75, roughness: 0.85 }),
+    dark: std(0xffffff, { map: darkS.map, roughness: 0.62 }),
+    white: std(0xffffff, { map: paintS.map, roughness: 0.55 }),
+    alu: std(0xffffff, { map: aluS.map, roughnessMap: aluS.rough, metalness: 0.8, roughness: 0.7 }),
     pipeY: std(0xe0b21a, { metalness: 0.3, roughness: 0.4 }),
     pipeB: std(0x3a7fd0, { metalness: 0.3, roughness: 0.4 }),
     ctrlWall: std(0x55657a, { roughness: 0.9 }),
@@ -114,36 +106,49 @@ export function buildWorld(scene, P) {
   };
 
   // ---------------------------------------------------------------- shells
-  plane(12, 10, M.floor, 0, 0, 0, '+y');
-  const ctrlFloorTex = tileTex('#3a4350', '#2d353f', 2); ctrlFloorTex.repeat.set(5, 4);
-  const ctrlFloor = std(0xffffff, { map: ctrlFloorTex, roughness: 0.8 });
-  plane(10, 8, ctrlFloor, 0, 0, -9, '+y');
-  plane(12, 10, M.ceil, 0, H, 0, '+y').rotation.x = Math.PI / 2;
-  plane(10, 8, M.ceil, 0, H, -9, '+y').rotation.x = Math.PI / 2;
+  plane(12, 10, floorMat(floorS, 12, 10), 0, 0, 0, '+y');
+  plane(10, 8, floorMat(ctrlFloorS, 10, 8), 0, 0, -9, '+y');
+  plane(12, 10, ceilMat(12, 10), 0, H, 0, '+y').rotation.x = Math.PI / 2;
+  plane(10, 8, ceilMat(10, 8), 0, H, -9, '+y').rotation.x = Math.PI / 2;
 
-  box(12.4, H, 0.2, M.wall, 0, H / 2, 5.1); col(-6.2, 6.2, 5, 5.2);
-  box(0.2, H, 10.4, M.wall, -6.1, H / 2, 0); col(-6.2, -6, -5.2, 5.2);
-  box(0.2, H, 10.4, M.wall, 6.1, H / 2, 0); col(6, 6.2, -5.2, 5.2);
-  box(5.4, H, 0.2, M.wall, -3.5, H / 2, -5.1); col(-6.2, -0.8, -5.2, -5);
-  box(5.4, H, 0.2, M.wall, 3.5, H / 2, -5.1); col(0.8, 6.2, -5.2, -5);
-  box(1.6, H - 2.4, 0.2, M.wall, 0, 2.4 + (H - 2.4) / 2, -5.1);
+  box(12.4, H, 0.2, wallMat(wallS, 12.4), 0, H / 2, 5.1); col(-6.2, 6.2, 5, 5.2);
+  box(0.2, H, 10.4, wallMat(wallS, 10.4), -6.1, H / 2, 0); col(-6.2, -6, -5.2, 5.2);
+  box(0.2, H, 10.4, wallMat(wallS, 10.4), 6.1, H / 2, 0); col(6, 6.2, -5.2, 5.2);
+  box(5.4, H, 0.2, wallMat(wallS, 5.4), -3.5, H / 2, -5.1); col(-6.2, -0.8, -5.2, -5);
+  box(5.4, H, 0.2, wallMat(wallS, 5.4), 3.5, H / 2, -5.1); col(0.8, 6.2, -5.2, -5);
+  box(1.6, H - 2.4, 0.2, wallMat(wallS, 1.6, H - 2.4), 0, 2.4 + (H - 2.4) / 2, -5.1);
   // control-room face of that wall in the control-room colour
-  plane(4.2, H, M.ctrlWall, -2.9, H / 2, -5.205, '-z'); plane(4.2, H, M.ctrlWall, 2.9, H / 2, -5.205, '-z');
-  plane(1.6, H - 2.4, M.ctrlWall, 0, 2.4 + (H - 2.4) / 2, -5.205, '-z');
+  plane(4.2, H, wallMat(ctrlS, 4.2), -2.9, H / 2, -5.205, '-z'); plane(4.2, H, wallMat(ctrlS, 4.2), 2.9, H / 2, -5.205, '-z');
+  plane(1.6, H - 2.4, wallMat(ctrlS, 1.6, H - 2.4), 0, 2.4 + (H - 2.4) / 2, -5.205, '-z');
   // control room: west + back walls, east wall split around the exit door (z -8.8…-7.2)
-  box(0.2, H, 8, M.ctrlWall, -5.1, H / 2, -9.2); col(-5.2, -5, -13.2, -5.2);
-  box(10.4, H, 0.2, M.ctrlWall, 0, H / 2, -13.1); col(-5.2, 5.2, -13.2, -13);
-  box(0.2, H, 4.4, M.ctrlWall, 5.1, H / 2, -11.0); col(5, 5.2, -13.2, -8.8);
-  box(0.2, H, 2.0, M.ctrlWall, 5.1, H / 2, -6.2); col(5, 5.2, -7.2, -5.2);
-  box(0.2, H - 2.4, 1.6, M.ctrlWall, 5.1, 2.4 + (H - 2.4) / 2, -8.0);
+  box(0.2, H, 8, wallMat(ctrlS, 8), -5.1, H / 2, -9.2); col(-5.2, -5, -13.2, -5.2);
+  // back wall, built around the window opening x[-4.0,-0.6] y[1.35,2.65]; texture offsets keep the plaster continuous
+  const piece = (x0, x1, y0, y1) => {
+    const m = std(0xffffff, { roughness: 0.93, bumpScale: 0.7 });
+    for (const [k, t] of [['map', ctrlS.map], ['bumpMap', ctrlS.bump]]) { const c = t.clone(); c.repeat.set((x1 - x0) / 3.5, (y1 - y0) / H); c.offset.set((x0 + 5.2) / 3.5, y0 / H); c.needsUpdate = true; m[k] = c; }
+    box(x1 - x0, y1 - y0, 0.2, m, (x0 + x1) / 2, (y0 + y1) / 2, -13.1);
+  };
+  piece(-5.2, -4.0, 0, H); piece(-0.6, 5.2, 0, H); piece(-4.0, -0.6, 0, 1.35); piece(-4.0, -0.6, 2.65, H);
+  col(-5.2, 5.2, -13.2, -13);
+  box(0.2, H, 4.4, wallMat(ctrlS, 4.4), 5.1, H / 2, -11.0); col(5, 5.2, -13.2, -8.8);
+  box(0.2, H, 2.0, wallMat(ctrlS, 2.0), 5.1, H / 2, -6.2); col(5, 5.2, -7.2, -5.2);
+  box(0.2, H - 2.4, 1.6, wallMat(ctrlS, 1.6, H - 2.4), 5.1, 2.4 + (H - 2.4) / 2, -8.0);
   // exit corridor
-  plane(4.0, 1.6, ctrlFloor, 7.0, 0, -8, '+y');                        // starts at x = 5.0: no gap under the exit door
-  plane(4.0, 1.6, M.ceil, 7.0, H, -8, '+y').rotation.x = Math.PI / 2;
-  box(3.8, H, 0.2, M.ctrlWall, 7.1, H / 2, -7.1); col(5.2, 9.2, -7.2, -7.0);
-  box(3.8, H, 0.2, M.ctrlWall, 7.1, H / 2, -8.9); col(5.2, 9.2, -9.0, -8.8);
-  refs.outsideMat = new THREE.MeshBasicMaterial({ map: skyTex(false) });
-  refs.dawnTex = skyTex(true);
-  plane(1.6, H, refs.outsideMat, 9.0, H / 2, -8, '-x'); col(9, 9.2, -8.8, -7.2);
+  plane(4.0, 1.6, floorMat(ctrlFloorS, 4.0, 1.6), 7.0, 0, -8, '+y');   // starts at x = 5.0: no gap under the exit door
+  plane(4.0, 1.6, ceilMat(4.0, 1.6), 7.0, H, -8, '+y').rotation.x = Math.PI / 2;
+  box(3.8, H, 0.2, wallMat(ctrlS, 3.8), 7.1, H / 2, -7.1); col(5.2, 9.2, -7.2, -7.0);
+  box(3.8, H, 0.2, wallMat(ctrlS, 3.8), 7.1, H / 2, -8.9); col(5.2, 9.2, -9.0, -8.8);
+  // Cologne across the Rhine (outside.js): storm blackout, the city re-energised, and the evening after the storm.
+  // The corridor ends in an open doorway onto the terrace, looking at the Dom.
+  refs.outside = new OutsideView({ scale: isTouchDevice() ? 0.5 : 1 });
+  refs.doorFrame = { origin: new THREE.Vector3(9.0, 0, -8), right: new THREE.Vector3(0, 0, 1), normal: new THREE.Vector3(-1, 0, 0), xCenter: 1024 + OUT.K * Math.PI / 2 };
+  refs.doorView = plane(1.6, 2.4, refs.outside.material(refs.doorFrame), 9.0, 1.2, -8, '-x');   // faces north-north-east: bridge end, KölnTriangle
+  box(0.2, H - 2.4, 1.6, wallMat(ctrlS, 1.6, H - 2.4), 9.1, 2.4 + (H - 2.4) / 2, -8); col(9, 9.2, -8.8, -7.2);
+  for (const z of [-8.77, -7.23]) box(0.12, 2.4, 0.06, M.alu, 8.96, 1.2, z);            // door frame
+  box(0.12, 0.06, 1.6, M.alu, 8.96, 2.37, -8);
+  box(0.14, 0.02, 1.6, M.metal, 8.95, 0.01, -8);                                        // threshold
+  refs.skyLight = new THREE.SpotLight(0xffc48c, 0, 9, 1.0, 0.8, 1);                 // warm evening sky light spilling in
+  refs.skyLight.position.set(8.9, 2.3, -8); refs.skyLight.target.position.set(6.2, 0, -8); scene.add(refs.skyLight, refs.skyLight.target);
   refs.exitTrigger = { minX: 7.6, maxX: 9, minZ: -8.8, maxZ: -7.2 };
   box(11.9, 0.1, 0.02, M.dark, 0, 0.05, 4.99);
   box(0.02, 0.1, 9.9, M.dark, -5.99, 0.05, 0);
@@ -159,17 +164,19 @@ export function buildWorld(scene, P) {
     refs.labLights.push({ light: l, mat });
   }
   refs.ctrlLights = [];
-  for (const [x, z] of [[-2.5, -9], [2.5, -9], [7.0, -8]]) {
+  for (const [x, z] of [[-2.5, -9], [2.5, -9]]) {
     const mat = glowMat(0xbcd4ff, 0.05);
     box(1.2, 0.06, 0.3, mat, x, H - 0.03, z);
     const l = new THREE.PointLight(0xfff1dc, 0, 0, 2); l.position.set(x, H - 0.3, z); scene.add(l);
     refs.ctrlLights.push({ light: l, mat });
   }
-  // emergency luminaires (battery backed): cool white, dim
+  box(1.2, 0.06, 0.3, glowMat(0xbcd4ff, 0.02), 7.0, H - 0.03, -8);                     // the corridor tube: dead (storm damage)
+  // emergency luminaires (battery backed): cool white, pointing down, so they make pools on the floor
   refs.emergency = [];
   for (const [x, y, z] of [[0, 3.2, 4.8], [-5.8, 3.2, -4.6], [5.8, 3.2, -4.6], [4.8, 3.2, -12.8]]) {
     box(0.4, 0.1, 0.12, glowMat(0xe8f0ff, 1.2), x, y, z);
-    const l = new THREE.PointLight(0xcfe0ff, 2.2, 0, 2); l.position.set(x, y - 0.2, z + (z > 0 ? -0.3 : 0.3)); scene.add(l);
+    const l = new THREE.SpotLight(0xcfe0ff, 2.6, 0, 1.05, 0.75, 2); l.position.set(x, y - 0.08, z + (z > 0 ? -0.2 : 0.2));
+    l.target.position.set(x, 0, z + (z > 0 ? -1.2 : 1.2)); scene.add(l, l.target);
     refs.emergency.push(l);
   }
   // green EXIT signs
@@ -202,10 +209,17 @@ export function buildWorld(scene, P) {
     }
   }
   refs.sunLampMat = lampMat;
-  refs.sunLight = new THREE.PointLight(0xfff0cc, 0, 0, 2); refs.sunLight.position.set(-4.95, 2.6, 0); scene.add(refs.sunLight);
-  const coneMat = new THREE.MeshBasicMaterial({ color: 0xfff0c0, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
-  noRay(box(1.6, 1.8, 3.8, coneMat, -4.95, 2.0, 0));
-  refs.sunCone = coneMat;
+  refs.sunLight = new THREE.SpotLight(0xfff0cc, 0, 0, 1.15, 0.6, 2); refs.sunLight.position.set(-4.95, 2.85, 0);
+  refs.sunLight.target.position.set(-4.95, 0, 0); scene.add(refs.sunLight, refs.sunLight.target);
+  // the light shaft: a soft volume that fades towards its edges (view angle) and towards the floor — no hard box edges
+  const coneMat = new THREE.ShaderMaterial({
+    uniforms: { opacity: { value: 0 } }, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    vertexShader: 'varying vec3 vN, vV; varying float vY; void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); vY = uv.y; gl_Position = projectionMatrix * mv; }',
+    fragmentShader: 'uniform float opacity; varying vec3 vN, vV; varying float vY; void main() { float edge = pow(abs(dot(normalize(vN), normalize(vV))), 2.0); gl_FragColor = vec4(vec3(1.0, 0.94, 0.78) * opacity * edge * smoothstep(0.0, 0.8, vY), 1.0); }',
+  });
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 1.25, 1.9, 32, 1, true), coneMat);
+  shaft.scale.set(1, 1, 1.6); shaft.position.set(-4.95, 1.95, 0); scene.add(noRay(shaft));
+  refs.sunCone = { get opacity() { return coneMat.uniforms.opacity.value; }, set opacity(v) { coneMat.uniforms.opacity.value = v; } };
   refs.keypadTex = canvasTex(256, 360, (ctx, w, h) => drawKeypad(ctx, w, h, false));
   const kp = new THREE.Group();
   box(0.06, 0.5, 0.36, M.dark, -5.97, 1.45, 2.85, kp);
@@ -223,6 +237,7 @@ export function buildWorld(scene, P) {
       ctx.fillStyle = '#8b9299'; ctx.fillRect(30, 80 + i * 56, 60, 8);
       ctx.fillStyle = '#3a3'; ctx.fillRect(w - 50, 82 + i * 56, 10, 10);
     }
+    weather(ctx, w, h, 1.2, 11);
   });
   refs.socLeds = [];
   for (const [i, zc] of [[0, 2.35], [1, 3.75]]) {
@@ -240,32 +255,21 @@ export function buildWorld(scene, P) {
   // ---------------------------------------------------------------- Inverters (right wall)
   refs.invLeds = {};
   const invDefs = [['inv_pv', 'INV-1', 'PV · HYBRID', 0.95], ['inv_bat', 'INV-2', 'BATTERY', 0.15], ['inv_fc', 'INV-3', 'FUEL CELL', -0.65]];
+  const IY = refs.INV_Y = 1.25, IT = IY + 0.36;                                          // centre and top of the inverters
   for (const [id, name, sub, zc] of invDefs) {
     const g = new THREE.Group();
-    box(0.22, 0.72, 0.56, M.white, 5.88, 1.6, zc, g);
+    box(0.22, 0.72, 0.56, M.white, 5.88, IY, zc, g);
     const t = labelTex([{ t: name, font: `bold 64px ${FONT.sans}` }, { t: sub, font: `bold 36px ${FONT.sans}`, color: '#1b5fa8' }, { t: '~ / =', font: `46px ${FONT.mono}`, color: '#666' }], { w: 256, h: 320, bg: '#f5f6f7' });
-    plane(0.5, 0.64, texMat(t), 5.765, 1.6, zc, '-x', g);
-    refs.invLeds[id] = box(0.03, 0.05, 0.05, glowMat(0x111111, 1), 5.75, 1.88, zc + 0.18, g);
+    plane(0.5, 0.64, texMat(t), 5.765, IY, zc, '-x', g);
+    refs.invLeds[id] = box(0.03, 0.05, 0.05, glowMat(0x111111, 1), 5.75, IY + 0.28, zc + 0.18, g);
     scene.add(g); tag(g, id, `${name} · ${sub.toLowerCase()} inverter`);
-    box(0.08, 3.1 - 1.96, 0.08, M.dark, 5.93, 1.96 + (3.1 - 1.96) / 2, zc - 0.2);
+    box(0.08, 3.1 - IT, 0.08, M.dark, 5.93, IT + (3.1 - IT) / 2, zc - 0.2);
   }
 
   // ---------------------------------------------------------------- Faraday (or whoever) the cat, asleep on INV-2
-  const cat = new THREE.Group();
-  const fur = std(0xd98a3a, { roughness: 0.95 }), furDark = std(0xa8611f, { roughness: 0.95 });
-  const body = sph(0.13, fur, 0, 0.075, 0, cat); body.scale.set(0.95, 0.6, 1.6);
-  const head = sph(0.085, fur, -0.02, 0.1, 0.19, cat); head.scale.set(1, 0.9, 1);
-  for (const s of [-1, 1]) {
-    const ear = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.06, 8), furDark);
-    ear.position.set(-0.02 + s * 0.045, 0.18, 0.2); ear.rotation.z = -s * 0.25; cat.add(ear);
-  }
-  const tail = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.022, 8, 20, Math.PI * 1.1), fur);
-  tail.rotation.x = Math.PI / 2; tail.position.set(0, 0.03, -0.02); cat.add(tail);
-  const collar = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.01, 6, 16), M.red); collar.position.set(-0.02, 0.07, 0.15); collar.rotation.x = Math.PI / 2.4; cat.add(collar);
-  const tagDisc = cyl(0.018, 0.005, std(0xe0b030, { metalness: 0.8, roughness: 0.3 }), -0.07, 0.05, 0.16, cat); tagDisc.rotation.z = Math.PI / 2;
-  cat.position.set(5.86, 1.96, 0.15);
-  scene.add(cat); tag(cat, 'cat', 'A sleeping cat');
-  refs.cat = { group: cat, body, tail };
+  refs.cat = buildCat({ M });
+  refs.cat.group.position.set(5.873, IT, 0.22);
+  scene.add(refs.cat.group); tag(refs.cat.group, 'cat', 'A sleeping cat');
 
   // ---------------------------------------------------------------- Main bus panel (right wall)
   const bus = new THREE.Group();
@@ -316,6 +320,7 @@ export function buildWorld(scene, P) {
     ctx.fillStyle = '#333'; ctx.font = `32px ${FONT.sans}`; ctx.fillText('3 kW · H₂O → H₂ + ½ O₂ · 30 bar', w / 2, 170);
     for (let i = 0; i < 18; i++) { ctx.fillStyle = i % 2 ? '#9aa4ad' : '#6f7a84'; ctx.fillRect(70 + i * 20, 220, 16, 180); }
     ctx.fillStyle = '#081a0e'; ctx.fillRect(140, 420, 232, 56);
+    weather(ctx, w, h, 1.2, 12);
   });
   const elz = new THREE.Group();
   box(1.6, 1.6, 1.1, M.white, -4.7, 0.8, -4.2, elz);
@@ -363,6 +368,7 @@ export function buildWorld(scene, P) {
     ctx.strokeStyle = '#333'; ctx.lineWidth = 6;
     ctx.beginPath(); ctx.arc(w / 2, 330, 120, 0, Math.PI * 2); ctx.stroke();
     for (let i = -100; i <= 100; i += 20) { ctx.beginPath(); ctx.moveTo(w / 2 - Math.sqrt(120 * 120 - i * i), 330 + i); ctx.lineTo(w / 2 + Math.sqrt(120 * 120 - i * i), 330 + i); ctx.stroke(); }
+    weather(ctx, w, h, 1.4, 13);
   });
   const fc = new THREE.Group();
   box(1.3, 1.3, 0.9, std(0x5b6570, { metalness: 0.3 }), 3.1, 0.65, -4.3, fc);
@@ -378,6 +384,7 @@ export function buildWorld(scene, P) {
     ctx.fillStyle = '#1b2530'; ctx.fillRect(70, 50, 116, 90);
     ctx.fillStyle = '#ffd200'; ctx.fillRect(16, 250, w - 32, 38);
     ctx.fillStyle = '#111'; ctx.font = `bold 20px ${FONT.sans}`; ctx.textAlign = 'center'; ctx.fillText('CONTROL ROOM', w / 2, 276);
+    weather(ctx, w, h, 1.5, 14);
   });
   refs.door = box(1.62, 2.4, 0.08, [M.metal, M.metal, M.metal, M.metal, texMat(doorTex, { metalness: 0.4 }), texMat(doorTex, { metalness: 0.4 })], 0, 1.2, -4.93);
   tag(refs.door, 'door', 'Booth door (motor drive)');
@@ -397,6 +404,7 @@ export function buildWorld(scene, P) {
     for (let i = 0; i < 14; i++) { ctx.fillStyle = 'rgba(120,130,160,.07)'; ctx.beginPath(); ctx.ellipse(80 + Math.random() * 860, 60 + Math.random() * 400, 120, 22, Math.random() - 0.5, 0, Math.PI * 2); ctx.fill(); }
     const hand = '"Segoe Print", "Comic Sans MS", "Chalkboard SE", "Comic Neue", cursive';
     whiteboardLines(P).forEach(([t, c, f], i) => { ctx.fillStyle = c; ctx.font = `${f || '28px'} ${hand}`; ctx.fillText(t, 40, 64 + i * 58); });
+    weather(ctx, w, h, 0.5, 15);
   });
   const wb = new THREE.Group();
   box(2.7, 1.4, 0.05, M.alu, -1.8, 1.75, 4.97, wb);
@@ -443,21 +451,30 @@ export function buildWorld(scene, P) {
   scene.add(res); tag(res, 'resistor', 'Resistor with a sticky note');
   recorder('rec1', 1.55, 0.95, 4.35, 0.2);
   // colour-code poster on the back wall
-  const ccTex = canvasTex(512, 700, (ctx, w, h) => {
+  // The multiplier band is the classic stumbling block (players read yellow-violet-red as "472"), so the poster
+  // spells it out: bands 1+2 are digits, band 3 is a MULTIPLIER, with a worked example that is not the answer.
+  const ccTex = canvasTex(512, 720, (ctx, w, h) => {
     ctx.fillStyle = '#fbfaf5'; ctx.fillRect(0, 0, w, h);
-    ctx.fillStyle = '#111'; ctx.font = `bold 34px ${FONT.sans}`; ctx.textAlign = 'center'; ctx.fillText('RESISTOR COLOUR CODE', w / 2, 48);
-    ctx.font = `20px ${FONT.sans}`; ctx.fillText('band 1 · band 2 · multiplier ×10ⁿ · tolerance', w / 2, 80);
+    ctx.fillStyle = '#111'; ctx.font = `bold 34px ${FONT.sans}`; ctx.textAlign = 'center'; ctx.fillText('RESISTOR COLOUR CODE', w / 2, 44);
+    ctx.font = `bold 20px ${FONT.sans}`; ctx.fillText('bands 1 + 2 = DIGITS  ·  band 3 = MULTIPLIER', w / 2, 76);
+    ctx.font = `italic 18px ${FONT.sans}`; ctx.fillStyle = '#b3261e'; ctx.fillText('band 3 is NOT a digit — it adds zeros!', w / 2, 100);
+    ctx.fillStyle = '#555'; ctx.font = `bold 17px ${FONT.sans}`; ctx.textAlign = 'left';
+    ctx.fillText('colour', 150, 132); ctx.fillText('digit', 262, 132); ctx.fillText('multiplier', 340, 132);
     ['black', 'brown', 'red', 'orange', 'yellow', 'green', 'blue', 'violet', 'grey', 'white'].forEach((n, i) => {
-      const y = 110 + i * 50;
-      ctx.fillStyle = RES_HEX[i]; ctx.fillRect(40, y, 90, 38); ctx.strokeStyle = '#999'; ctx.strokeRect(40, y, 90, 38);
-      ctx.fillStyle = '#111'; ctx.textAlign = 'left'; ctx.font = `bold 26px ${FONT.sans}`;
-      ctx.fillText(`${n}`, 150, y + 28); ctx.fillText(`${i}`, 300, y + 28); ctx.fillText(`×10${'⁰¹²³⁴⁵⁶⁷⁸⁹'[i]}`, 370, y + 28);
+      const y = 142 + i * 46;
+      ctx.fillStyle = RES_HEX[i]; ctx.fillRect(40, y, 90, 36); ctx.strokeStyle = '#999'; ctx.strokeRect(40, y, 90, 36);
+      ctx.fillStyle = '#111'; ctx.font = `bold 24px ${FONT.sans}`;
+      ctx.fillText(n, 150, y + 26); ctx.fillText(String(i), 272, y + 26); ctx.fillText(RES_MULT[i], 340, y + 26);
     });
-    ctx.fillStyle = '#c8a040'; ctx.fillRect(40, 610, 90, 38); ctx.strokeRect(40, 610, 90, 38);
-    ctx.fillStyle = '#111'; ctx.fillText('gold', 150, 638); ctx.fillText('—', 300, 638); ctx.fillText('±5 % (tol.)', 370, 638);
+    const gy = 142 + 10 * 46;
+    ctx.fillStyle = '#c8a040'; ctx.fillRect(40, gy, 90, 36); ctx.strokeRect(40, gy, 90, 36);
+    ctx.fillStyle = '#111'; ctx.fillText('gold', 150, gy + 26); ctx.fillText('—', 272, gy + 26); ctx.fillText('±5 % tol.', 340, gy + 26);
+    ctx.font = `18px ${FONT.sans}`; ctx.fillStyle = '#1b3f8f'; ctx.textAlign = 'center';
+    ctx.fillText('e.g. brown · black · orange · gold', w / 2, 680); ctx.fillText('= 1, 0, ×1 000  →  10 × 1 000 = 10 000 Ω', w / 2, 704);
+    weather(ctx, w, h, 0.7, 16);
   });
   const cc = new THREE.Group();
-  plane(0.64, 0.875, texMat(ccTex), 4.6, 1.85, 4.985, '-z', cc);
+  plane(0.64, 0.9, texMat(ccTex), 4.6, 1.85, 4.985, '-z', cc);
   scene.add(cc); tag(cc, 'colorcode', 'Colour-code poster');
 
   // ---------------------------------------------------------------- Control room
@@ -519,10 +536,30 @@ export function buildWorld(scene, P) {
   refs.wallScreenTex = canvasTex(768, 400);
   plane(3.0, 1.56, new THREE.MeshBasicMaterial({ map: refs.wallScreenTex }), -4.965, 1.9, -9.2, '+x');   // 1.5 cm in front of the frame (no z-fighting)
   box(0.04, 1.66, 3.1, M.dark, -5.0, 1.9, -9.2);
-  // window (back wall)
-  refs.windowMat = new THREE.MeshBasicMaterial({ map: skyTex(false) });
-  plane(3.4, 1.3, refs.windowMat, -2.3, 2.0, -12.98, '+z');
-  box(3.5, 0.08, 0.1, M.alu, -2.3, 1.33, -12.95); box(3.5, 0.08, 0.1, M.alu, -2.3, 2.67, -12.95);
+  // window (back wall): glass near the outer face of the wall, plastered reveals, a window board, aluminium frame
+  plane(3.4, 1.3, refs.outside.material({ origin: new THREE.Vector3(-2.3, 0, -13.16), right: new THREE.Vector3(1, 0, 0), normal: new THREE.Vector3(0, 0, 1) }), -2.3, 2.0, -13.16, '+z');
+  const dropTex = canvasTex(512, 512, drawDroplets); dropTex.wrapS = dropTex.wrapT = THREE.RepeatWrapping; dropTex.repeat.set(3, 1.2);
+  refs.rainTex = canvasTex(512, 512, drawRunnels); refs.rainTex.wrapS = refs.rainTex.wrapT = THREE.RepeatWrapping; refs.rainTex.repeat.set(3, 1.2);
+  refs.dropMat = new THREE.MeshBasicMaterial({ map: dropTex, transparent: true, depthWrite: false, fog: false });
+  refs.rainMat = new THREE.MeshBasicMaterial({ map: refs.rainTex, transparent: true, depthWrite: false, fog: false });
+  noRay(plane(3.4, 1.3, refs.dropMat, -2.3, 2.0, -13.156, '+z'));
+  noRay(plane(3.4, 1.3, refs.rainMat, -2.3, 2.0, -13.154, '+z'));
+  const reveal = std(0xd9dde0, { roughness: 0.9 });
+  plane(0.2, 1.3, reveal, -3.999, 2.0, -13.1, '+x'); plane(0.2, 1.3, reveal, -0.601, 2.0, -13.1, '-x');
+  plane(3.4, 0.2, reveal, -2.3, 2.649, -13.1, '+y').rotation.x = Math.PI / 2;
+  box(3.56, 0.035, 0.3, std(0x8d8a84, { roughness: 0.45 }), -2.3, 1.335, -13.02);        // stone window board
+  for (const x of [-3.97, -0.63, -2.3]) box(0.06, 1.3, 0.07, M.alu, x, 2.0, -13.16);   // frame + mullion
+  for (const y of [1.38, 2.62]) box(3.4, 0.06, 0.07, M.alu, -2.3, y, -13.16);
+  // One light from outside through the glass: lightning at night, the low evening sun at the end (sunset ≈ 21° left of
+  // the window's axis, 10° high). It casts shadows, so the frame and mullion throw a window-shaped pool across the room.
+  const sunDir = new THREE.Vector3(-Math.sin(0.37) * Math.cos(0.18), Math.sin(0.18), -Math.cos(0.37) * Math.cos(0.18));
+  const win = new THREE.Vector3(-2.3, 2.0, -13.15);
+  refs.windowLight = new THREE.SpotLight(0xffb070, 0, 0, 0.24, 0.35, 0);
+  refs.windowLight.position.copy(win).addScaledVector(sunDir, 10); refs.windowLight.target.position.copy(win).addScaledVector(sunDir, -10);
+  refs.windowLight.castShadow = true;
+  Object.assign(refs.windowLight.shadow, { autoUpdate: false, needsUpdate: true, bias: -0.0006, normalBias: 0.02 });
+  refs.windowLight.shadow.mapSize.set(1024, 1024); refs.windowLight.shadow.camera.near = 6; refs.windowLight.shadow.camera.far = 24;
+  scene.add(refs.windowLight, refs.windowLight.target);
   plane(1.2, 0.26, texMat(labelTex(['CONTROL ROOM ▸'], { w: 592, h: 128, bg: '#1b2530', fg: '#ffd24a', font: `bold 60px ${FONT.sans}` })), 0, 2.93, -4.99, '+z');
 
   // ---------------------------------------------------------------- Tie panel (sync) + checklist + exit door (east wall)
@@ -541,6 +578,7 @@ export function buildWorld(scene, P) {
     ctx.font = `17px ${FONT.sans}`;
     ['0. permit card in', '1. V island = V grid ±2%', '2. f island a hair ABOVE', '3. phase ro▒▒▒n: lamps', '    dark TOGETHER', '4. close on scope at 12', '— M.V.'].forEach((t, i) => ctx.fillText(t, 16, 76 + i * 44));
     ctx.fillStyle = '#e8e0c8'; ctx.beginPath(); ctx.moveTo(w, h - 60); ctx.lineTo(w - 70, h); ctx.lineTo(w, h); ctx.fill();
+    weather(ctx, w, h, 0.9, 17);
   });
   const ck = new THREE.Group();
   plane(0.26, 0.32, texMat(ckTex), 4.985, 1.55, -11.7, '-x', ck);
@@ -551,11 +589,14 @@ export function buildWorld(scene, P) {
     ctx.fillStyle = '#1b2530'; ctx.fillRect(70, 50, 116, 90);
     ctx.fillStyle = '#0c7a35'; ctx.fillRect(16, 250, w - 32, 38);
     ctx.fillStyle = '#fff'; ctx.font = `bold 22px ${FONT.sans}`; ctx.textAlign = 'center'; ctx.fillText('EXIT ▸ OUTSIDE', w / 2, 276);
+    weather(ctx, w, h, 1.3, 18);
   });
   refs.exitDoor = box(0.08, 2.4, 1.62, [texMat(exitTex, { metalness: 0.4 }), texMat(exitTex, { metalness: 0.4 }), M.metal, M.metal, M.metal, M.metal], 5.07, 1.2, -8.0);
   tag(refs.exitDoor, 'exit', 'Exit door');
   refs.exitCollider = col(4.95, 5.25, -8.85, -7.15);
   refs.exitLed = box(0.04, 0.06, 0.5, glowMat(0xff2020, 1.5), 4.98, 2.52, -8.0);
 
+  buildDetails({ scene, P, refs, M, col, box, cyl, sph, plane, texMat, glowMat, tag, noRay });
+  scene.fog = new THREE.FogExp2(0x0b0e13, 0.028);
   return { colliders, refs };
 }

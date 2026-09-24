@@ -4,12 +4,14 @@ import { LabSim, PH, PH_COLORS, C, setPalette } from './labsim.js';
 import { Terminal } from './terminal.js';
 import { GridGame, CFG as GRID } from './gridgame.js';
 import { SyncSim, drawSyncScope } from './sync.js';
-import { makePuzzle, evalCircuit, RES_HEX, RES_COLORS } from './puzzle.js';
+import { makePuzzle, evalCircuit, RES_HEX, RES_COLORS, RES_MULT } from './puzzle.js';
 import { memos, checklistText, whiteboardLines, INTRO, RANKS } from './story.js';
 import { Sound } from './audio.js';
 import { loadSettings, settingsHtml, bindSettings } from './settings.js';
 import { TouchControls, isTouchDevice } from './touch.js';
 import { redraw, FONT } from './textures.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { PostFX } from './postfx.js';
 
 // ============================================================ boot
 const params = new URLSearchParams(location.search);
@@ -31,7 +33,7 @@ const $ = (id) => document.getElementById(id);
 
 let renderer;
 try {
-  renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  renderer = new THREE.WebGLRenderer({ antialias: settings.quality === 'low', powerPreference: 'high-performance' });
 } catch {
   document.body.insertAdjacentHTML('beforeend', '<div class="overlay"><div class="card"><h2>WebGL unavailable</h2><p>This game needs a browser with WebGL enabled.</p></div></div>');
   throw new Error('WebGL unavailable');
@@ -41,6 +43,8 @@ renderer.setPixelRatio(pixelRatio());
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.15;
+// a single shadow-casting light (through the control-room window: lightning, then the evening sun); its map is drawn once
+renderer.shadowMap.enabled = !isTouchDevice(); renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 $('app').appendChild(renderer.domElement);
 const canvas = renderer.domElement;
 canvas.setAttribute('aria-label', '3D view of the laboratory');
@@ -49,18 +53,38 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x05080c);
 const camera = new THREE.PerspectiveCamera(settings.fov, innerWidth / innerHeight, 0.05, 100);
 camera.rotation.order = 'YXZ';
+// image-based lighting: gives metals, paint and floors believable reflections (intensity follows the room lights)
+{ const pmrem = new THREE.PMREMGenerator(renderer); scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture; pmrem.dispose(); }
+scene.environmentIntensity = 0.08;
+const postfx = new PostFX(renderer, scene, camera);
+let postQuality = null;
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  postfx.setSize(innerWidth, innerHeight);
 });
 
 const { colliders, refs } = buildWorld(scene, P);
+// upload the large outdoor layers and compile every shader now, not at the first look out of the window
+for (const t of Object.values(refs.outside.night)) renderer.initTexture(t);
+scene.traverse((o) => { if (o.isMesh && !o.material.transparent && !o.material.isShaderMaterial) { o.castShadow = true; o.receiveShadow = true; } });
+refs.cat.eyeOpen.visible = true;                          // compile the cat's open eye too, not on the 4th pet
+renderer.compile(scene, camera);
+refs.cat.eyeOpen.visible = false;
+// the last shot of the game: the outdoor view rendered full-screen from a camera that has stepped out onto the terrace
+const outroView = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), refs.outside.material(refs.doorFrame, { trees: false }));   // (a tree would stand right beside the camera)
+Object.assign(outroView.material, { depthTest: false, depthWrite: false });
+outroView.renderOrder = 1000; outroView.frustumCulled = false; outroView.position.z = -0.2; outroView.visible = false;
+camera.add(outroView); scene.add(camera);
+const fadeEl = document.createElement('div'); fadeEl.id = 'fade'; document.body.appendChild(fadeEl);
+const captionEl = document.createElement('div'); captionEl.id = 'caption'; document.body.appendChild(captionEl);
+function caption(text, sec = 4) { captionEl.textContent = text; captionEl.classList.add('show'); clearTimeout(caption.t); caption.t = setTimeout(() => captionEl.classList.remove('show'), sec * 1000); }
 const sim = new LabSim(P);
 const sync = new SyncSim(P);
 const sound = new Sound(); sound.setVolume(settings.volume);
 const MEMOS = memos(P);
 
-// highlight box for the targeted object
+// highlight for the targeted object: an outline in post-processing; this box is the fallback on 'low' quality
 const highlight = new THREE.Box3Helper(new THREE.Box3(), 0xffd24a);
 highlight.material.depthTest = false; highlight.material.transparent = true; highlight.material.opacity = 0.7; highlight.renderOrder = 10;
 highlight.visible = false; scene.add(highlight);
@@ -73,12 +97,20 @@ const ui = {
   prompt: $('prompt'), cross: $('crosshair'), objective: $('objective'), busHud: $('busHud'), toast: $('toast'), end: $('end'),
   timer: $('timer'), inv: $('inv'), hint: $('hintBox'), journal: $('journal'),
 };
+/** vertical FOV from the setting — widened in portrait so phones don't get tunnel vision (≥ 62° horizontal) */
+function viewFov() {
+  const a = camera.aspect;
+  return a >= 1 ? settings.fov : Math.max(settings.fov, Math.min(100, 2 * Math.atan(Math.tan((62 * Math.PI) / 360) / a) * 180 / Math.PI));
+}
 function applySettings() {
-  camera.fov = settings.fov; camera.updateProjectionMatrix();
+  camera.fov = viewFov(); camera.updateProjectionMatrix();
+  renderer.toneMappingExposure = 1.15 * settings.brightness;
   sound.setVolume(settings.volume);
   document.documentElement.style.setProperty('--ui', settings.uiScale);
   setPalette(settings.palette);
   renderer.setPixelRatio(pixelRatio());
+  if (postQuality !== settings.quality) { postQuality = settings.quality; postfx.configure(settings.quality, { touch: isTouchDevice() }); }
+  postfx.setSize(innerWidth, innerHeight);
   sim.version++;
 }
 applySettings();
@@ -93,9 +125,11 @@ const G = {
   time: { elapsed: 0, penalty: 0, splits: {} },
   drawer: { code: [0, 0, 0, 0], open: false, taken: false },
   board: { bits: [0, 0, 0, 0], solved: false, fails: 0 },
-  diag: false, f2seen: false, exitOpen: false, catPets: 0, termOpened: false,
-  shake: 0,
+  diag: false, f2seen: false, exitOpen: false, catPets: 0, termOpened: false, busSeen: false,
+  shake: 0, shakeDir: new THREE.Vector3(0, 1, 0),
 };
+/** a damped camera kick in one direction (not white-noise jitter) */
+function kick(sec) { if (settings.reducedMotion) return; G.shake = sec; G.shakeDir.set(Math.random() - 0.5, 1, Math.random() - 0.5).normalize(); }
 const player = { x: 0, z: 2.6, yaw: 0, pitch: -0.05, eye: 1.65, r: 0.3, vx: 0, vz: 0, bob: 0, stepAcc: 0 };
 const keys = {};
 let sprintTouch = false;
@@ -143,13 +177,20 @@ function setStage(st) {
   if (G.stage === st) return;
   G.stage = st;
   G.time.splits[st] = totalTime();
-  if (st === 'permit') addItem('permit');
+  if (st === 'control') { G.boltIn = 0.6; refs.windowLight.shadow.needsUpdate = true; }   // a strike right as the door reveals the window
+  if (st === 'permit') {
+    addItem('permit');
+    // the grid operator re-energises the city: it is live again at our incomer — only this building is still dark.
+    // Draw + upload the evening now as well (hidden by the console closing), not at the sync moment.
+    for (const m of ['restored', 'evening']) for (const tex of refs.outside.prepare(m)) renderer.initTexture(tex);
+    refs.outside.setMode('restored');
+    setTimeout(() => caption('Across the river the city lights come back on. The grid is live again — only this building is still dark.', 6), 1200);
+  }
   if (st === 'synced') {
-    refs.windowMat.map = refs.dawnTex; refs.windowMat.needsUpdate = true;
-    refs.outsideMat.map = refs.dawnTex; refs.outsideMat.needsUpdate = true;
-    G.exitOpen = true;
+    refs.outside.setMode('evening');                                         // the storm front passes; the sun sets behind the old town
+    G.exitOpen = true; G.syncT = 0;
     sim.s.grid = true;
-    setTimeout(() => { sound.thunk(); toast('The building is back on the grid. The exit is unlocked!', 'good'); }, 600);
+    refs.windowLight.shadow.needsUpdate = true;
   }
   save();
 }
@@ -178,7 +219,7 @@ function hintTopic() {
   if (G.stage === 'permit') return { id: 'sync', tiers: [
     'The tie panel (Q0) is on the east wall next to the exit. Marco pinned a checklist nearby, and the grid operator\'s e-mail lists their values.',
     'Insert the permit card. Match the voltage, run the island slightly FASTER than the grid, and watch the three lamps: if they chase each other instead of going dark together, the incoming phases are swapped. Close on the synchroscope at 12 o\'clock.',
-    `Insert the permit card. Island ${P.gridV} V, ${(P.gridF + 0.04).toFixed(2)} Hz. The lamps chase → press "Swap L2 ↔ L3" once. Press CLOSE (or Space) when the needle is in the green sector.`] };
+    `Insert the permit card. Island ${P.gridV} V, ${(P.gridF + 0.04).toFixed(2)} Hz. ${P.swapped ? 'In this room the lamps chase → press "Swap L2 ↔ L3" once.' : 'In this room the lamps already go dark together → leave the jumper as found.'} Press CLOSE (or Space) when the needle is in the green sector.`] };
   return { id: 'exit', tiers: ['Walk out!', 'The exit door is in the east wall of the control room.', 'Go through the open exit door and down the corridor.'] };
 }
 
@@ -226,6 +267,7 @@ function lockPointer() {
 }
 function enterPlay() {
   G.mode = 'play';
+  if (G.coldPending) { G.coldPending = false; G.cold = 0; }
   ui.resume.classList.add('hidden');
   lockedAt = performance.now();
 }
@@ -286,7 +328,11 @@ function propPanel(id) {
       <div class="lcd" style="font-size:18px">Collar tag: “${P.cat.toUpperCase()}”</div>
       <button class="btn" data-act="pet">Pet the cat</button>`,
     onOpen: () => note('cat', 'The cat on INV-2', `Collar tag: "${P.cat.toUpperCase()}"`),
-    onAct: () => { G.catPets++; sound.beep(70, 0.7, 'sine', 0.15); toast(G.catPets > 3 ? 'He opens one eye. Judging you.' : 'Prrrrr. (He did not bite.)'); },
+    onAct: () => {
+      G.catPets++; sound.purrLoud();
+      if (G.catPets > 3) G.catEye = 2.5; else G.earFlick = { ear: G.catPets % 2, t: 0.35 };
+      toast(G.catPets > 3 ? 'He opens one eye. Judging you.' : 'Prrrrr. (He did not bite.)');
+    },
   };
   D.drawer = {
     title: 'Bench drawer · 4-wheel combination lock',
@@ -301,7 +347,10 @@ function propPanel(id) {
       if (k === 'digit') { G.drawer.code.shift(); G.drawer.code.push(Number(i)); }
       if (k === 'dopen') {
         if (G.drawer.code.join('') === P.drawerCode) { G.drawer.open = true; sound.clack(); toast('Click — the drawer slides open.', 'good'); note('drawer', 'Bench drawer', `Code ${P.drawerCode}. It held the H₂ valve handwheel.`); }
-        else { sound.bad(); toast('The lock doesn\'t budge.', 'bad'); }
+        else if ([`${P.bands.join('')}0`, `0${P.bands.join('')}`].includes(G.drawer.code.join(''))) {
+          // the classic misreading: third band taken as a digit (4-7-2 → 4720 or 0472) — nudge, no penalty
+          sound.bad(); toast('The wheels almost give… Is the third band really a digit? Check the colour-code poster.', 'bad');
+        } else { sound.bad(); toast('The lock doesn\'t budge.', 'bad'); }
       }
       if (k === 'take') { G.drawer.taken = true; addItem('handwheel'); }
       drawLock();
@@ -316,9 +365,10 @@ function propPanel(id) {
   };
   D.colorcode = {
     title: 'Resistor colour code (poster)',
-    controls: () => `<table class="phase-table"><tr><th>Colour</th><th>Digit</th><th>Multiplier</th></tr>${RES_COLORS.map((n, i) => `<tr><td><i class="sw" style="background:${RES_HEX[i]}"></i> ${n}</td><td>${i}</td><td>× 10${'⁰¹²³⁴⁵⁶⁷⁸⁹'[i]}</td></tr>`).join('')}<tr><td><i class="sw" style="background:#c8a040"></i> gold</td><td>—</td><td>tolerance ±5 %</td></tr></table>
-      <p class="note">4-band resistor: digit, digit, multiplier, tolerance (gold ±5 %).</p>`,
-    onOpen: () => note('colorcode', 'Resistor colour code', 'digit · digit · ×10ⁿ · tolerance — black 0, brown 1, red 2, orange 3, yellow 4, green 5, blue 6, violet 7, grey 8, white 9.'),
+    controls: () => `<p><b>Bands 1 + 2 = digits · band 3 = multiplier</b> <span class="bad">(band 3 is not a digit — it adds zeros)</span> · band 4 = tolerance</p>
+      <table class="phase-table"><tr><th>Colour</th><th>Digit (bands 1–2)</th><th>Multiplier (band 3)</th></tr>${RES_COLORS.map((n, i) => `<tr><td><i class="sw" style="background:${RES_HEX[i]}"></i> ${n}</td><td>${i}</td><td>${RES_MULT[i]} <span class="note">(${i ? `+${i} zero${i > 1 ? 's' : ''}` : 'no zeros'})</span></td></tr>`).join('')}<tr><td><i class="sw" style="background:#c8a040"></i> gold</td><td>—</td><td>tolerance ±5 %</td></tr></table>
+      <p class="note">Example: brown · black · orange · gold = 1, 0, ×1 000 → 10 × 1 000 = 10 000 Ω.</p>`,
+    onOpen: () => note('colorcode', 'Resistor colour code', 'Bands 1+2 = digits, band 3 = MULTIPLIER (number of zeros), band 4 = tolerance. black 0, brown 1, red 2, orange 3, yellow 4, green 5, blue 6, violet 7, grey 8, white 9. Example: brown·black·orange = 10 × 1 000 = 10 000 Ω.'),
   };
   D.whiteboard = {
     title: 'Whiteboard (half erased)',
@@ -380,7 +430,7 @@ function propPanel(id) {
           : !G.permitIn ? `${lcd('Q0 INTERLOCKED — insert the operator\'s permit card.', true)}<button class="btn on" data-act="permit">🪪 Insert the permit card</button>` : lcd('Permit card accepted — interlock released.')}
       <div class="ctl"><label>Island voltage</label><div class="seg">${[-5, -1, 1, 5].map((v) => `<button class="btn" data-act="sv:${v}">${v > 0 ? '+' : '−'}${Math.abs(v)} V</button>`).join('')}</div></div>
       <div class="ctl"><label>Island frequency</label><div class="seg">${[-0.1, -0.01, 0.01, 0.1].map((v) => `<button class="btn" data-act="sf:${v}">${v > 0 ? '+' : '−'}${Math.abs(v)} Hz</button>`).join('')}</div></div>
-      <div class="ctl"><label>Incomer terminals</label><div class="seg"><button class="btn" data-act="swap">⇄ Swap L2 ↔ L3</button></div><span class="note">jumper position ${sync.swapped ? 'A (as found after the storm repair)' : 'B (L2 ↔ L3 crossed)'}</span></div>
+      <div class="ctl"><label>Incomer terminals</label><div class="seg"><button class="btn" data-act="swap">⇄ Swap L2 ↔ L3</button></div><span class="note">jumper position ${sync.swapped === P.swapped ? 'A (as found)' : 'B (L2 ↔ L3 exchanged)'}</span></div>
       ${sync.closed ? '' : '<button class="btn big danger" data-act="sclose" style="margin-top:4px">CLOSE Q0 <span class="kbd-hint" style="font-size:12px">(Space)</span></button>'}`,
     anim: () => { const cv = $('syncCv'); if (cv) drawSyncScope(cv.getContext('2d'), cv.width, cv.height, sync); },
     onAct: (a) => {
@@ -396,6 +446,18 @@ function propPanel(id) {
       if (k === 'sclose') closeTie();
     },
   };
+  D.clock = {
+    title: 'Wall clock',
+    controls: () => (G.stage === 'synced' || G.stage === 'won'
+      ? '<p>It is ticking again — the 50 Hz are back. Somebody will have to set it right: it still lags by the length of the blackout.</p>'
+      : '<p>A mains-synchronous clock: its motor counts the 50 Hz of the grid. It stopped at <b>18:36:02</b> — the moment the grid went down.</p>'),
+    onOpen: () => note('clock', 'Wall clock', 'Mains-synchronous clock, stopped at 18:36:02 when the grid went down.'),
+  };
+  D.cabinet = { say: () => 'Expense reports 2019–2023 and a folder marked "DO NOT OPEN — M.V.". It is empty.' };
+  D.bin = { say: () => `Crumpled drafts. One says: "${P.bands.join('-')}?? NO — the third band is the number of ZEROS. — M.V."` };
+  D.boxes = { say: () => 'Spare III-V test modules, still in their foam. The "THIS SIDE UP" arrows point down.' };
+  D.papers = { say: () => 'Test protocols for the PV rig. Somebody drew a cat in the margin.' };
+  D.cork = { say: () => 'The duty rota, the guest Wi-Fi name, a lunch invite for 12:30. None of it opens anything. Probably.' };
   D.exit = {
     title: 'Exit door',
     controls: () => (G.exitOpen ? '<p>The door is open. Fresh air!</p>' : '<p>The access control is dead: the building has no grid supply. Only the life-safety circuits run on the emergency generator.</p>'),
@@ -410,11 +472,10 @@ function closeTie() {
   if (!grid.permit || !G.permitIn) { sound.bad(); toast(grid.permit ? 'Q0 is interlocked: insert the permit card first.' : 'Q0 is interlocked: no reconnection permit yet (gridctl).', 'bad'); return; }
   const r = sync.check();
   if (r.ok) {
-    sync.closed = true; sound.thunk(); sound.fanfare();
-    toast('Q0 CLOSED — synchronised! The lab is back on the grid.', 'good');
+    sync.closed = true; sound.thunk(); sound.resolve();
     setStage('synced');
   } else {
-    sync.flash = 1; G.shake = settings.reducedMotion ? 0 : 0.5; sound.clack(); sound.thunk();
+    sync.flash = settings.reduceFlashing ? 0.3 : 1; kick(0.5); sound.clack(); sound.thunk();
     penalty(30, r.why);
   }
 }
@@ -429,6 +490,7 @@ function openPanel(id) {
   if (!def) return;
   openOverlay('panel');
   G.panelId = id; G.panelVersion = -1;
+  if (sim.panel(id)) G.busSeen = true;                     // the bus HUD appears once the player works on the lab devices
   ui.panelTitle.textContent = def.title;
   ui.panel.classList.remove('hidden');
   def.onOpen?.();
@@ -468,6 +530,8 @@ function interact(id) {
   if (!id) return;
   sound.init();
   sound.click();
+  const say = propPanel(id)?.say;
+  if (say) { toast(say()); return; }
   if (id === 'pc') { G.termOpened = true; openOverlay('terminal'); terminal.open(); return; }
   if (id === 'door' && sim.s.door.state === 'open') return;
   openPanel(id);
@@ -634,7 +698,7 @@ function move(dt) {
     player.stepAcc += sp * dt;
     if (player.stepAcc > (sprint ? 0.8 : 0.65)) { player.stepAcc = 0; sound.step(); }
   }
-  const fovT = settings.fov + (sprint && sp > 3.5 && !settings.reducedMotion ? 6 : 0);
+  const fovT = viewFov() + (sprint && sp > 3.5 && !settings.reducedMotion ? 6 : 0);
   if (Math.abs(camera.fov - fovT) > 0.05) { camera.fov += (fovT - camera.fov) * Math.min(1, dt * 6); camera.updateProjectionMatrix(); }
 }
 
@@ -673,11 +737,13 @@ function updateTarget() {
       G.target = id;
       const st = stateLabel(id);
       ui.prompt.innerHTML = `<b>${touch.enabled ? 'USE' : 'E'}</b> · ${hit.object.userData.label}${st ? ` <span class="st">· ${st}</span>` : ''}`;
-      box3.setFromObject(hit.object.userData.root); box3.expandByScalar(0.02);
+      G.targetRoot = hit.object.userData.root;
+      box3.setFromObject(G.targetRoot); box3.expandByScalar(0.02);
       highlight.box.copy(box3);
     }
   }
-  highlight.visible = !!G.target;
+  const outlined = postfx.select(G.target ? [G.targetRoot] : []);
+  highlight.visible = !!G.target && !outlined;
   ui.prompt.style.display = G.target ? 'block' : 'none';
   ui.cross.classList.toggle('active', !!G.target);
   if (prev !== G.target && G.target) sound.beep(2400, 0.015, 'sine', 0.012);
@@ -694,25 +760,105 @@ function updateVisuals(dt) {
   const synced = G.stage === 'synced' || G.stage === 'won';
   const ease = (cur, target, k) => cur + (target - cur) * Math.min(1, dt * k);
   refs.sunLampMat.emissiveIntensity = ease(refs.sunLampMat.emissiveIntensity, s.sun.on ? 3 : 0.05, 3);
-  refs.sunLight.intensity = ease(refs.sunLight.intensity, s.sun.on ? 22 : 0, 3);
-  refs.sunCone.opacity = ease(refs.sunCone.opacity, s.sun.on ? 0.07 : 0, 3);
+  refs.sunLight.intensity = ease(refs.sunLight.intensity, s.sun.on ? 18 : 0, 3);
+  refs.sunCone.opacity = ease(refs.sunCone.opacity, s.sun.on ? 0.1 : 0, 3);
+  const calm = settings.reduceFlashing;
+  // cold open (a fresh game): the lab is lit and humming — a close strike — the tubes die — the emergency lights click on
+  const cold = G.cold ?? 99;
+  if (cold < 99) {
+    G.cold = cold + dt;
+    if (cold < 1.2 && G.cold >= 1.2) { G.boltT = 0; G.thunderIn = 0.35; G.thunderKm = 1.2; kick(0.4); }
+    if (cold < 2.4 && G.cold >= 2.4) sound.clack();
+    if (cold < 3.2 && G.cold >= 3.2) caption('18:36:02 — the grid is gone.', 4);
+    if (G.cold > 12) G.cold = 99;
+  }
+  // fluorescent tubes strike with a scripted starter pattern (frame-rate independent), each flash with a tink
+  const STRIKE = [[0.07, 1], [0.18, 0], [0.06, 1], [0.3, 0]];   // two short blinks, then on (≤ 3 flashes per second)
+  const tube = (st, on) => {
+    if (on && !st.on) { st.t = 0; st.step = -1; }
+    st.on = on;
+    if (!on) return 0;
+    st.t = (st.t ?? 9) + dt;
+    if (calm) return 1;
+    let acc = 0;
+    for (let k = 0; k < STRIKE.length; k++) {
+      acc += STRIKE[k][0];
+      if (st.t < acc) { if (STRIKE[k][1] && st.step !== k) { st.step = k; sound.tink(); } return STRIKE[k][1]; }
+    }
+    return 1;
+  };
   // lab lighting follows the energised phases (each phase feeds one group of fixtures)
   let litCount = 0;
   refs.labLights.forEach((L, i) => {
-    const on = synced || f.live[fixturePhase[i]];
-    const st = fixtureState[i];
-    if (on && !st.on) st.flicker = 0.45;
-    st.on = on;
-    st.flicker = Math.max(0, st.flicker - dt);
-    const fl = st.flicker > 0 ? (Math.random() < 0.5 ? 0.15 : 1) : 1;
-    L.light.intensity = st.flicker > 0 ? 9 * fl : ease(L.light.intensity, on ? 9 : 0, 6);
-    L.mat.emissiveIntensity = on ? 1.6 * fl : 0.05;
-    if (on) litCount++;
+    let k;
+    if (cold < 1.2) k = 1;                                  // cold open: still lit …
+    else if (cold < 1.6) k = !calm && cold > 1.32 && cold < 1.42 ? 1 : 0;   // … one last gasp, then dark
+    else k = tube(fixtureState[i], synced || f.live[fixturePhase[i]]);
+    L.light.intensity = k ? ease(L.light.intensity, 7, 25) : ease(L.light.intensity, 0, 30);
+    L.mat.emissiveIntensity = k ? 1.6 : 0.05;
+    if (k) litCount++;
   });
-  refs.ctrlLights.forEach((L) => { L.light.intensity = ease(L.light.intensity, synced ? 11 : 0, 2); L.mat.emissiveIntensity = synced ? 1.4 : 0.05; });
+  // reconnection: the control-room tubes strike one after another and settle at a working level; the clocks run again
+  if (G.syncT !== undefined) G.syncT += dt;
+  refs.ctrlLights.forEach((L, i) => {
+    const on = synced && (G.syncT === undefined || G.syncT > 0.9 + i * 0.8);
+    const k = tube(L, on);
+    L.light.intensity = k ? ease(L.light.intensity, 3.2, 20) : 0;
+    L.mat.emissiveIntensity = k ? 1.2 : 0.05;
+  });
+  if (synced && Math.floor(t) !== G.clockSec) { G.clockSec = Math.floor(t); refs.setClocks(refs.CLOCK_STOPPED + (G.syncT ?? 0)); }
   const over = TIME_LIMIT - totalTime() < 0;
-  refs.emergency.forEach((l, i) => { l.intensity = over ? (Math.sin(t * 7 + i) > 0.6 ? 0.4 : 1.1) : 2.2; });
-  refs.hemi.intensity = ease(refs.hemi.intensity, 0.2 + 0.45 * (litCount / 4) + (synced ? 0.5 : 0), 3);
+  refs.emergency.forEach((l, i) => {                     // battery-backed luminaires: the odd stutter, weaker in overtime
+    if (!calm && Math.random() < 0.0015) l.userData.stutter = 0.12;
+    l.userData.stutter = Math.max(0, (l.userData.stutter || 0) - dt);
+    const off = cold < 2.4 + i * 0.12;                   // cold open: they click on one by one
+    l.intensity = off ? 0 : l.userData.stutter > 0 ? 0.8 : over ? (Math.sin(t * 7 + i) > 0.6 ? 0.5 : 1.3) : 2.6;
+  });
+  refs.hemi.intensity = ease(refs.hemi.intensity, 0.08 + 0.35 * (litCount / 4) + (synced ? 0.3 : 0), 3);
+  scene.environmentIntensity = ease(scene.environmentIntensity, 0.04 + 0.18 * (litCount / 4) + (synced ? 0.12 : 0), 3);
+  // storm outside: lightning (≤ 2 pulses per strike, strikes ≥ 7 s apart — or one soft swell with "reduce flashing"),
+  // thunder after distance / speed of sound, rain on the glass
+  const O = refs.outside.u, eve = O.uEve.value;
+  if (!synced && G.mode !== 'start') {
+    G.boltIn = (G.boltIn ?? 5) - dt;
+    if (G.boltIn <= 0) {
+      G.boltIn = 7 + Math.random() * 16; G.boltT = 0; refs.outside.strike();
+      G.thunderKm = 2 + Math.random() * 6; G.thunderIn = G.thunderKm * 1000 / 343;
+    }
+  }
+  if (G.boltT !== undefined) G.boltT += dt;
+  const bt = G.boltT ?? 99, pulse = (t0, a) => (bt < t0 ? 0 : a * Math.exp(-(bt - t0) / 0.08));
+  const flash = bt > 3 ? 0 : calm ? 0.3 * Math.min(1, bt / 0.15) * Math.exp(-bt / 0.5) : Math.min(1, pulse(0, 1) + pulse(0.24, 0.6));
+  if (G.thunderIn > 0 && (G.thunderIn -= dt) <= 0) sound.thunder(Math.min(1, 2.6 / G.thunderKm) * (player.z > -5 ? 0.6 : 1), G.thunderKm);
+  refs.outside.update(dt, flash);
+  refs.dropMat.opacity = Math.min(1, O.uRain.value * 1.4);
+  refs.rainMat.opacity = O.uRain.value;
+  refs.rainTex.offset.y = (refs.rainTex.offset.y + dt * 0.03) % 1;           // runnels creeping down the glass
+  const roomLit = refs.ctrlLights[0].light.intensity / 3.2;                     // the pane reflects the control room
+  O.uRoom.value.setRGB(0.012 + 0.08 * roomLit, 0.016 + 0.07 * roomLit, 0.02 + 0.06 * roomLit);
+  // one light through the window: cold lightning, or the low warm evening sun (the frame throws its shadow)
+  const sunK = eve * 5, flK = flash * 3.5;
+  refs.windowLight.intensity = sunK + flK;
+  if (sunK + flK > 0) refs.windowLight.color.setRGB((1.0 * sunK + 0.75 * flK) / (sunK + flK), (0.68 * sunK + 0.82 * flK) / (sunK + flK), (0.4 * sunK + 1.0 * flK) / (sunK + flK));
+  refs.skyLight.intensity = eve * 7;
+  if (G.syncT > 3 && !G.shadowRedone) { G.shadowRedone = true; refs.windowLight.shadow.needsUpdate = true; }   // exit door has moved
+  // the cat: slow sleeping breaths, the hanging tail swaying, now and then an ear flick; lifts his head to open an eye
+  const eyeOpen = (G.catEye = Math.max(0, (G.catEye || 0) - dt)) > 0;
+  refs.cat.eyeOpen.visible = eyeOpen; refs.cat.lids.forEach((l) => { l.visible = !eyeOpen; });
+  G.catLift = ease(G.catLift || 0, eyeOpen ? 1 : 0, 4); refs.cat.lift(G.catLift);
+  // dust motes: only where a light beam shows them (sun simulator, evening sun through the window)
+  for (const [d, vis] of [[refs.dustSun, s.sun.on ? 0.7 : 0], [refs.dustBeam, eve * 0.8]]) {
+    d.material.opacity = ease(d.material.opacity, vis, 2);
+    if (d.material.opacity < 0.01) continue;
+    const p = d.geometry.attributes.position.array, b = d.userData.box, k = d.userData.seed;
+    for (let i = 0; i < p.length; i += 3) {
+      p[i] += Math.sin(t * 0.25 + i * 0.37 + k) * 0.012 * dt;
+      p[i + 1] -= (0.012 + (i % 11) * 0.002) * dt;
+      p[i + 2] += Math.cos(t * 0.21 + i * 0.29 + k) * 0.012 * dt;
+      if (p[i + 1] < b[2]) p[i + 1] = b[3];
+    }
+    d.geometry.attributes.position.needsUpdate = true;
+  }
   refs.busbars.forEach((m, p) => {
     m.material.emissive.set(s.trip[p] ? (Math.sin(t * 10) > 0 ? '#ff0000' : '#330000') : PH_COLORS[p]);
     m.material.emissiveIntensity = s.trip[p] ? 1.5 : 0.05 + Math.min(3, f.load[p] * 0.6);
@@ -734,14 +880,18 @@ function updateVisuals(dt) {
   refs.h2Bar.scale.y = Math.max(0.001, s.h2.level);
   refs.valve.visible = s.h2.wheel; refs.valveTag.visible = !s.h2.wheel;
   refs.valve.rotation.z = ease(refs.valve.rotation.z, s.h2.valve ? Math.PI * 1.5 : 0, 4);
-  refs.cat.body.scale.y = 0.6 + Math.sin(t * 1.8) * 0.02;
-  refs.cat.tail.rotation.z = Math.sin(t * 0.7) * 0.15;
+  const breath = Math.sin(t * 1.9);
+  refs.cat.body.scale.set(1 + breath * 0.012, 1 + breath * 0.035, 1);
+  refs.cat.tail.rotation.x = Math.sin(t * 0.55) * 0.1 + Math.sin(t * 1.7) * 0.025;
+  if (Math.random() < dt * 0.12) G.earFlick = { ear: Math.random() < 0.5 ? 0 : 1, t: 0.35 };
+  refs.cat.ears.forEach((e, i) => { e.rotation.x = -0.25 + (G.earFlick && G.earFlick.ear === i ? Math.sin((0.35 - G.earFlick.t) * 36) * 0.35 * (G.earFlick.t / 0.35) : 0); });
+  if (G.earFlick && (G.earFlick.t -= dt) <= 0) G.earFlick = null;
   // booth door follows the drive progress
   const dTarget = s.door.state === 'open' ? 1.65 : s.door.state === 'opening' ? 1.65 * Math.min(1, s.door.t / C.DOOR_T) : 0;
   refs.door.position.x = ease(refs.door.position.x, dTarget, 4);
   refs.doorCollider.enabled = refs.door.position.x < 1.35;
   refs.doorLed.material.emissive.set(s.door.state === 'open' ? '#20ff60' : s.door.state === 'opening' ? (Math.sin(t * 12) > 0 ? '#ffb020' : '#ff2020') : sim.doorReady() ? '#ffb020' : '#ff2020');
-  if (prevDoor !== 'open' && s.door.state === 'open') G.shake = settings.reducedMotion ? 0 : 0.35;
+  if (prevDoor !== 'open' && s.door.state === 'open') kick(0.35);
   prevDoor = s.door.state;
   refs.exitDoor.position.z = ease(refs.exitDoor.position.z, G.exitOpen ? -6.4 : -8.0, 1.2);
   refs.exitCollider.enabled = refs.exitDoor.position.z < -6.7;
@@ -814,7 +964,7 @@ function drawScreens() {
       ctx.font = `24px ${FONT.mono}`;
       const synced = G.stage === 'synced' || G.stage === 'won';
       const rows = [
-        ['Public grid', synced ? 'CONNECTED ✔' : 'LOST (storm)'], ['PV (test rig)', `${f.pv.toFixed(2)} kW`], ['Battery', `${(s.bat.soc * 100).toFixed(0)} % SOC`],
+        ['Public grid', synced ? 'CONNECTED ✔' : G.stage === 'permit' ? 'LIVE at incomer · site OFF' : 'LOST (storm)'], ['PV (test rig)', `${f.pv.toFixed(2)} kW`], ['Battery', `${(s.bat.soc * 100).toFixed(0)} % SOC`],
         ['H₂ tank', `${(s.h2.level * C.H2_KG * 1000).toFixed(0)} g`], ['Fuel cell', s.fc.running ? 'RUNNING' : 'STOPPED'],
         ['Reconnection', synced ? 'DONE' : G.stage === 'permit' ? 'PERMIT ✔ — sync Q0' : 'root required'],
       ];
@@ -828,8 +978,9 @@ function drawScreens() {
 function updateHud() {
   const s = sim.s, f = sim.f;
   ui.objective.innerHTML = `<span class="lbl">Objective</span>${objective()}`;
-  ui.busHud.style.display = G.stage === 'lab' ? '' : 'none';
-  if (G.stage === 'lab') {
+  const showBus = G.stage === 'lab' && G.busSeen;
+  ui.busHud.style.display = showBus ? '' : 'none';
+  if (showBus) {
     ui.busHud.innerHTML = `<div style="color:#ffd24a;margin-bottom:4px">MAIN BUS · headroom</div>` +
       PH.map((n, p) => `<div class="row"><span style="color:${PH_COLORS[p]}">${n}${s.trip[p] ? ' <span class="bad">TRIP</span>' : f.live[p] ? '' : ' <span style="color:#778">dead</span>'}</span><span>${f.live[p] ? f.head[p].toFixed(2) + ' kW' : '—'} ${f.head[p] >= C.DOOR_P ? '✔' : ''}</span></div>
         <div class="bar"><i style="width:${Math.max(0, Math.min(100, f.head[p] / 6 * 100))}%;background:${f.head[p] >= C.DOOR_P ? '#3ecf7a' : PH_COLORS[p]}"></i><span class="mark" style="left:50%"></span></div>`).join('') +
@@ -843,8 +994,11 @@ function updateHud() {
 function updateAudio(dt) {
   const s = sim.s, f = sim.f;
   const synced = G.stage === 'synced' || G.stage === 'won';
+  const inside = player.z > -5 ? 1 : player.x > 5 && G.exitOpen ? 0.2 : 0.55;   // booth / corridor with the door open / control room
   sound.update(camera, {
-    hum: Math.min(1, f.load.reduce((a, b) => a + b, 0) / 9) + (synced ? 0.5 : 0),
+    rain: G.mode === 'start' ? 0.4 : refs.outside.u.uRain.value, inside: G.outro ? 0 : inside,
+    purr: 1, drone: !synced && G.mode !== 'start' && (G.cold ?? 99) > 3 ? 1 : 0, evening: refs.outside.u.uEve.value,
+    hum: (G.cold ?? 99) < 1.2 ? 1 : Math.min(1, f.load.reduce((a, b) => a + b, 0) / 9) + (synced ? 0.5 : 0),
     fan: f.fc > 0 ? 1 : s.fc.running ? 0.4 : 0,
     bubbles: f.elz > 0 ? 1 : 0,
     ballast: s.sun.on ? 1 : 0,
@@ -859,7 +1013,7 @@ function save() {
     v: 2, seed, stage: G.stage, at: Date.now(),
     player: { x: player.x, z: player.z, yaw: player.yaw, pitch: player.pitch },
     sim: sim.s, term: terminal.serialize(), grid: grid.serialize(), sync: sync.serialize(),
-    G: { inventory: G.inventory, journal: G.journal, heard: G.heard, hints: G.hints, time: G.time, drawer: G.drawer, board: G.board, diag: G.diag, f2seen: G.f2seen, exitOpen: G.exitOpen, catPets: G.catPets, termOpened: G.termOpened, gridResult: G.gridResult, permitIn: G.permitIn },
+    G: { inventory: G.inventory, journal: G.journal, heard: G.heard, hints: G.hints, time: G.time, drawer: G.drawer, board: G.board, diag: G.diag, f2seen: G.f2seen, exitOpen: G.exitOpen, catPets: G.catPets, termOpened: G.termOpened, gridResult: G.gridResult, permitIn: G.permitIn, busSeen: G.busSeen },
   });
 }
 function restore(sv) {
@@ -877,10 +1031,12 @@ function restore(sv) {
   refs.exitDoor.position.z = G.exitOpen ? -6.4 : -8.0;
   refs.drawer.position.z = G.drawer.open ? 4.15 : 4.55;
   drawLock();
-  if (G.stage === 'synced') {
-    refs.windowMat.map = refs.dawnTex; refs.windowMat.needsUpdate = true;
-    refs.outsideMat.map = refs.dawnTex; refs.outsideMat.needsUpdate = true;
+  if (G.stage === 'permit') {                                // the city is already back; prepare the evening now, not at the sync
+    for (const m of ['restored', 'evening']) for (const tex of refs.outside.prepare(m)) renderer.initTexture(tex);
+    refs.outside.setMode('restored', true);
   }
+  if (G.stage === 'synced' || G.stage === 'won') { refs.outside.setMode('evening', true); G.syncT = 99; }
+  refs.windowLight.shadow.needsUpdate = true;
   renderInv();
 }
 addEventListener('pagehide', save);
@@ -893,8 +1049,15 @@ function showStart() {
   const svC = live(0), svD = live(daily);
   const cont = (v, k) => (v ? `<button class="btn big" data-start="${k}">Continue ${k === 'cont-classic' ? 'classic' : 'daily'} <span class="small">(${mmss(v.G.time.elapsed + v.G.time.penalty)})</span></button>` : '');
   const card = $('startCard');
+  const trophies = store.get(ACH_KEY) || [];
+  let streak = 0;
+  for (let d = new Date(), k = 0; k < 400; k++, d.setDate(d.getDate() - 1)) {
+    const key = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    if (best[key]) streak++; else if (k > 0) break;
+  }
+  const bestList = Object.entries(best).sort((a, b) => (a[0] === '0' ? -1 : b[0] === '0' ? 1 : b[0] - a[0])).slice(0, 4);
   card.innerHTML = `<h1>${INTRO.title}</h1>
-    <p class="lead">${INTRO.lead}</p><p>${INTRO.body}</p>
+    <p class="lead">${INTRO.lead}</p>
     <div class="controls-help">${touchMode
       ? '<div>Left thumb: move</div><div>Right thumb: look</div><div>Tap an object / USE: interact</div><div>💡 hints · 📓 journal</div>'
       : '<div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> run</div><div><kbd>Mouse</kbd> look</div><div><kbd>E</kbd>/<kbd>Click</kbd> use</div><div><kbd>H</kbd> hint</div><div><kbd>J</kbd> journal</div><div><kbd>Esc</kbd> menu</div>'}</div>
@@ -904,7 +1067,8 @@ function showStart() {
       <button class="btn big alt" data-start="daily">${svD ? 'Restart' : 'Play'} daily room · ${String(daily).slice(6)}.${String(daily).slice(4, 6)}.</button>
       <button class="btn" data-start="settings">⚙ Settings</button>
     </div>
-    ${Object.keys(best).length ? `<p class="note">Best: ${Object.entries(best).map(([k, v]) => `${k === '0' ? 'Classic' : 'Daily ' + k} ${mmss(v.time)} (${v.rank})`).join(' · ')}</p>` : ''}
+    ${bestList.length ? `<p class="note">Best: ${bestList.map(([k, v]) => `${k === '0' ? 'Classic' : 'Daily ' + String(k).slice(6) + '.' + String(k).slice(4, 6) + '.'} ${mmss(v.time)} (${v.rank})`).join(' · ')}${streak > 1 ? ` · 🔥 daily streak ${streak}` : ''}</p>` : ''}
+    ${trophies.length ? `<p class="note trophies">🏆 ${trophies.length}/${ACH_NAMES.length}: ${trophies.join(' · ')}</p>` : ''}
     <p class="note">Every code in a daily room is different. Progress is saved automatically in this browser.</p>`;
   card.querySelectorAll('[data-start]').forEach((b) => b.addEventListener('click', () => {
     const a = b.dataset.start;
@@ -927,14 +1091,44 @@ function showStart() {
 function begin(fresh) {
   ui.start.classList.add('hidden'); ui.hud.classList.remove('hidden');
   G.mode = 'paused';
+  if (fresh) startBriefing();
   touch.enable(touchMode);
   if (touchMode) enterPlay(); else lockPointer();
   sound.init();
-  if (fresh) { sound.good(); toast(seed ? `Daily room ${seed}: every code is different today.` : 'Find a way out. The emergency light won\'t last forever.'); }
+  if (fresh && seed) toast(`Daily room ${seed}: every code is different today.`);
   else toast('Welcome back.');
   renderInv();
 }
 
+const ACH_KEY = 'ple-achievements';
+const ACH_NAMES = ['No hints', 'No breaker trips', 'Grid wizard (3★)', 'Under 30 minutes', 'Cat person', 'Heard every memo', 'Clean logic'];
+/** A fresh run: the briefing goes to the journal, and the cold open plays once the player is in control. */
+function startBriefing() {
+  G.coldPending = true;
+  note('brief', 'Briefing', INTRO.body.replace(/<br>/g, '\n'));
+}
+/** The last shot: control is taken away, the camera walks out onto the terrace and turns to the Dom and the sunset. */
+function startOutro() {
+  G.outro = { t: 0, x0: player.x, z0: player.z, yaw0: player.yaw, pitch0: player.pitch, bells: false };
+  G.mode = 'outro';
+  if (document.pointerLockElement) document.exitPointerLock();
+  clearKeys(); ui.hud.classList.add('hidden'); ui.prompt.style.display = 'none'; highlight.visible = false; postfx.select([]);
+  toasts.length = 0; nextToast(); captionEl.classList.remove('show');
+}
+function updateOutro(dt) {
+  const o = G.outro; o.t += dt;
+  const e = (a, b) => { const k = Math.max(0, Math.min(1, (o.t - a) / (b - a))); return k * k * (3 - 2 * k); };
+  const walk = e(0, 3.0), pan = e(2.8, 7.2);
+  player.x = o.x0 + (10.4 - o.x0) * walk + 0.3 * pan;
+  player.z = o.z0 + (-8 - o.z0) * walk;
+  const dy = ((-Math.PI / 2 - o.yaw0 + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+  player.yaw = o.yaw0 + dy * Math.min(1, walk * 1.6) + (0.24 + Math.PI / 2) * pan;   // face out, then turn left to the Dom and the sun
+  player.pitch = o.pitch0 + (0.03 - o.pitch0) * walk;
+  outroView.visible = camera.position.x > 8.93;
+  if (!o.bells && o.t > 3.4) { o.bells = true; [0, 2.1, 4.2, 6.3].forEach((w, i) => sound.bell(i % 2 ? 110 : 98, w, 0.045)); }
+  if (o.t > 9.5 && !o.faded) { o.faded = true; fadeEl.classList.add('on'); }
+  if (o.t > 11 && !o.done) { o.done = true; win(); setTimeout(() => fadeEl.classList.remove('on'), 300); }
+}
 function win() {
   setStage('won');
   openOverlay('end');
@@ -942,7 +1136,7 @@ function win() {
   const rank = RANKS.find(([m]) => total / 60 < m)[1];
   const best = store.get(BEST_KEY) || {};
   const key = String(seed);
-  const isBest = !best[key] || total < best[key].time;
+  const isBest = !G.noSave && (!best[key] || total < best[key].time);   // debug (?skip=) runs don't count
   if (isBest) { best[key] = { time: total, rank }; store.set(BEST_KEY, best); }
   store.del(SAVE_KEY);
   const gr = G.gridResult;
@@ -950,10 +1144,11 @@ function win() {
     [G.hints.used === 0, 'No hints'], [sim.s.stats.trips === 0, 'No breaker trips'], [gr?.stars === 3, 'Grid wizard (3★)'],
     [total < 30 * 60, 'Under 30 minutes'], [G.catPets > 0, 'Cat person'], [Object.keys(G.heard).length === 4, 'Heard every memo'], [G.board.fails === 0, 'Clean logic'],
   ];
+  if (!G.noSave) store.set(ACH_KEY, ACH_NAMES.filter((n) => (store.get(ACH_KEY) || []).includes(n) || ach.some(([ok, m]) => ok && m === n)));
   const splits = Object.entries(G.time.splits).filter(([k]) => SPLIT[k]).map(([k, v]) => `<span>${SPLIT[k]}</span><span>${mmss(v)}</span>`).join('');
   const share = `⚡ Power Lab Escape · ${seed ? 'Daily ' + seed : 'Classic'} · ${mmss(total)} · ${G.hints.used} hints · grid ${gr ? '★'.repeat(gr.stars) : '–'} · "${rank}"`;
-  $('endCard').innerHTML = `<h1>🌅 YOU ESCAPED</h1>
-    <p class="lead">Dawn. The storm has passed and the lab hums on the grid again. Rank: <b>${rank}</b>${isBest ? ' · new personal best!' : ''}</p>
+  $('endCard').innerHTML = `<h1>🌇 YOU ESCAPED</h1>
+    <p class="lead">Evening. The storm has passed, the sun is going down behind the Dom, and the lab hums on the grid again. Rank: <b>${rank}</b>${isBest ? ' · new personal best!' : ''}</p>
     <div class="res">${splits}<span class="tot">Total (incl. ${mmss(G.time.penalty)} penalties)</span><span class="tot">${mmss(total)}</span>
       <span>Hints used</span><span>${G.hints.used}</span><span>Breaker trips</span><span>${sim.s.stats.trips}</span>
       ${gr ? `<span>Dispatch score</span><span>${'★'.repeat(gr.stars)}${'☆'.repeat(3 - gr.stars)} ${(gr.ratio * 100).toFixed(0)} %</span>` : ''}</div>
@@ -969,7 +1164,11 @@ function win() {
   $('shareBtn').onclick = () => { navigator.clipboard?.writeText(share).then(() => toast('Result copied!', 'good'), () => toast(share)); };
   $('dailyBtn').onclick = () => { location.search = `?seed=${todaySeed()}&autostart=1`; };
   $('againBtn').onclick = () => { location.search = '?autostart=1'; };
-  $('keepBtn').onclick = () => { ui.end.classList.add('hidden'); G.mode = 'paused'; closeOverlay(); };
+  $('keepBtn').onclick = () => {
+    ui.end.classList.add('hidden'); ui.hud.classList.remove('hidden');
+    outroView.visible = false; Object.assign(player, { x: 7.2, z: -8, yaw: Math.PI / 2 }); G.outro = null;
+    G.mode = 'paused'; closeOverlay();
+  };
 }
 
 // ============================================================ main loop
@@ -994,12 +1193,13 @@ function loop(now) {
   if (G.mode === 'play' || G.mode === 'paused') move(dt);
   if (G.stage === 'synced' && G.mode === 'play') {
     const e = refs.exitTrigger;
-    if (player.x > e.minX && player.x < e.maxX && player.z > e.minZ && player.z < e.maxZ) win();
+    if (player.x > e.minX && player.x < e.maxX && player.z > e.minZ && player.z < e.maxZ) startOutro();
   }
+  if (G.mode === 'outro' || (G.outro && !G.outro.done)) updateOutro(dt);
   const bob = settings.reducedMotion ? 0 : Math.sin(player.bob) * 0.03 * Math.min(1, Math.hypot(player.vx, player.vz) / 3);
   G.shake = Math.max(0, G.shake - dt);
-  const sh = G.shake * 0.05;
-  camera.position.set(player.x + (Math.random() - 0.5) * sh, player.eye + bob + (Math.random() - 0.5) * sh, player.z + (Math.random() - 0.5) * sh);
+  const sh = G.shake > 0 ? Math.sin(G.shake * 45) * G.shake * 0.09 : 0;           // damped kick along one direction
+  camera.position.set(player.x + G.shakeDir.x * sh, player.eye + bob + G.shakeDir.y * sh, player.z + G.shakeDir.z * sh);
   camera.rotation.set(player.pitch, player.yaw, 0);
   if (G.mode === 'start') { camera.position.set(Math.sin(now / 9000) * 2, 1.9, 2.8); camera.rotation.set(-0.12, Math.sin(now / 9000) * 0.5, 0); }
 
@@ -1014,7 +1214,8 @@ function loop(now) {
   saveTimer -= dt;
   if (saveTimer <= 0) { saveTimer = 5; save(); }
 
-  if (G.mode !== 'grid') renderer.render(scene, camera);   // the dispatch console covers the whole screen
+  // AO off behind overlays and in the last shot (its depth buffer still holds the building); the console covers everything
+  if (G.mode !== 'grid') postfx.render(dt, outroView.visible || ['panel', 'terminal', 'journal', 'hint', 'menu'].includes(G.mode));
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
@@ -1042,7 +1243,8 @@ if (skip) {
   if (skip === 'grid') { terminal.stack.push({ user: 'root', cwd: '/root' }); setStage('root'); openGrid(); }
   if (skip === 'sync') { setStage('root'); grid.permit = true; setStage('permit'); player.x = 3.6; player.z = -10.6; player.yaw = -Math.PI / 2; }
 } else if (params.get('continue') && sv0 && (sv0.seed || 0) === seed) { restore(sv0); showResumeGate(); toast('Welcome back.'); }
-else if (params.get('autostart')) { store.del(SAVE_KEY); showResumeGate(); toast(seed ? `Daily room ${seed}: every code is different today.` : 'Find a way out. The emergency light won\'t last forever.'); }
+else if (params.get('autostart')) { store.del(SAVE_KEY); showResumeGate(); startBriefing(); if (seed) toast(`Daily room ${seed}: every code is different today.`); }
 else showStart();
 
-window.__game = { player, sim, G, P, interact, terminal, grid, sync, refs, openPanel, setStage, win, save };
+window.__game = { player, sim, G, P, interact, terminal, grid, sync, refs, openPanel, setStage, win, save, postfx, renderer };
+$('loading')?.remove();

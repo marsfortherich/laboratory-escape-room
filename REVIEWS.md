@@ -1,12 +1,14 @@
 # Expert reviews
 
-Three specialist reviewers looked at v1 of the game. v2 was rebuilt around their findings, the same reviewers re-reviewed it, and v2.1 addresses the second round.
+Three specialist reviewers looked at v1 of the game. v2 was rebuilt around their findings, the same reviewers re-reviewed it, and v2.1 addresses the second round. For round 3 (v3) a movie director and a QA engineer joined them.
 
 | Reviewer | Focus |
 |---|---|
 | 🔬 **Science nerd** (energy-systems engineer / physicist) | physical plausibility, 3-phase concepts, market realism, educational value |
 | 🔐 **Escape-room nerd** (250+ rooms played, puzzle designer) | puzzle flow, clue design, fairness, hints, theme, finale |
 | 🎮 **Video-game nerd** (indie dev, web-game tech) | bugs, controls, UX, audio-visuals, platform, retention |
+| 🎬 **Movie director** (director / cinematographer) | lighting, composition, colour, pacing, sound, environmental storytelling (round 3) |
+| 🧪 **QA engineer** | visual and functional regressions, repro steps (v2.2 and round 3) |
 
 ## Round 1 — v1 scores
 
@@ -111,3 +113,59 @@ A QA agent then played the live build visually. It took screenshots from player 
 | The interaction prompt covered the aim point; mobile: 9 px scope text, broken `help` columns, keyboard hints on touch | Prompt moved lower, larger scope text, single-column `help`, keyboard-only hints hidden on touch devices |
 
 Every clue matched its solution in both rooms: plaque year and PIN, lamp count and Caesar shift, DIAG LEDs and the binary value, circuit poster and board, collar tag and password, e-mail values and sync panel, checklist and code tolerances.
+
+## Owner feedback after v2.2
+
+| Feedback | Change |
+|---|---|
+| The resistor reads yellow-violet-red = "4720", but the code is 4700 | The poster and panel say it plainly: bands 1–2 are digits, **band 3 is a multiplier**, with a worked example that isn't the answer. The misreading gives a no-penalty nudge, and a test makes sure it is never the answer. |
+| The city outside should look like Cologne; the graphics are too clean | A procedural **Cologne skyline** (Dom, Groß St. Martin, Hohenzollern Bridge, Colonius, Kranhäuser, the Rhine). Grimy procedural plaster, worn floor tiles, a drop ceiling, brushed metal, weathered labels, contact shadows, ambient occlusion, bloom and film grain. |
+| The cat looks weird | A curled **ginger tabby**: a swept-tube body with a painted coat, fur shells, sheen, closed eyes, whiskers and a collar. It breathes, its tail sways and its ears flick. |
+| Cables glitch through objects and the ground | Every run starts inside its device and ends in a gland, socket or junction box. The path is lifted onto the floor, and an automated check finds no clipping. |
+| The window view needs depth | The window became a **parallax view**: each pixel traces the player's line of sight into city layers at real distances, a reflecting Rhine, a wet terrace with railing, a street lamp and trees, and rain at several depths. |
+
+## Round 3 — v3 review scores
+
+The review ran on the build with the parallax window, the new cat and the re-routed cables.
+
+| | v2 | **Round 3** | Notes |
+|---|---|---|---|
+| 🔬 Science | 8.5 | **8.0** | Simulation core re-verified. The new outdoor scene had a sunrise in the west, city lights that came back only after the sync, oversized landmarks and a too-short thunder delay. |
+| 🔐 Escape room | 7.5 | **8.0** | Clue fairness fixed (resistor). The finale, the drawer multiplier and a failed trading day could be solved from memory. |
+| 🎮 Video game | 8.0 | **8.5** | The parallax window is "the best thing in the game". Flashing, no anti-aliasing, a hitch on the cat's eye and after restoring at the permit stage. |
+| 🎬 Movie director | — | **6.5** | Strong frames, but the lighting didn't build to the payoff and the payoff was cut short by a stats card. No storm sound. |
+| 🧪 QA | — | **no critical bugs** | 660 shader renders without NaN or black pixels. Rain in rows and misplaced cable glands (medium), six low findings. |
+
+### Changes after round 3 (v3)
+
+| Reviewer finding | Change |
+|---|---|
+| 🎬 The payoff is cut to a spreadsheet | **A last shot:** control is taken away and the camera walks out through the doorway onto the terrace, turns to the Dom and the sunset while the Dom's bells ring, holds, and fades to warm white. Only then does the end card appear. The fanfare plays only there. |
+| 🔬 The sun rose in the west; the timeline ends at ≈ 19:40 | The storm clears into an **evening**: the sun sets behind the old town, low and almost due west, silhouettes get a warm rim light, and street lamps and floodlights come *on*. |
+| 🔬 The city relit because the lab synchronised | **The city comes back at the permit stage**, feeder by feeder: lit windows, the floodlit Dom, bridge lights and a sodium glow under the clouds. Only the building stays dark. The wall screen reads "LIVE at incomer · site OFF". |
+| 🎬 The room lights beat the sunrise; the sun beam was swamped | Reconnection is its own scene. The control-room tubes strike one after another with starter tinks and settle at a working level. The clocks tick again, and the **evening sun through the window is the key light**: one shadow-casting light throws a pool shaped like the two panes, with the mullion's shadow, across the room. At night the same light is the lightning. |
+| 🎬 Corridor final shot looked like a poster | The corridor tube is dead (storm damage). A warm sky light spills in through the doorway. The doorway now looks north-north-east along its own axis, and the last shot turns to the Dom. |
+| 🎬 No storm sound | Rain and gusting wind (muffled in the booth), rain drumming on the control-room window. Thunder comes distance ÷ 343 m/s after the flash, with more crack from closer strikes. A low drone under the blackout **resolves into a major chord when Q0 closes**. After the storm: birds, returning traffic and the Dom's bells. |
+| 🎬 🔐 The cat was hard to see from standing height | The inverters hang lower, so the cat is at eye level. A soft **purr** is audible within about 2 m, and he purrs properly when petted. Shorter, depth-writing fur shells replace the spiky ones, and the whiskers are dimmer. His head lifts when the eye opens. |
+| 🎬 The blackout wasn't dark | Much less ambient fill. The emergency luminaires are downward spots that make pools on the floor, and they click on one by one. |
+| 🎬 Opening | A **cold open**: the booth is lit and humming, a close strike, the tubes gasp and die, the emergency lights click on, and one line appears: "18:36:02 — the grid is gone." The start card is a single line; the briefing is in the journal. The bus HUD appears once you work on the devices. |
+| 🎬 Sun simulator: a hard-edged box of light, flat white wash | A soft light shaft that fades towards its edges and the floor, and a downward spot. |
+| 🎬 Dust motes like dead pixels; white-noise camera shake | Soft round motes, only in the sun simulator's beam and the evening window light. The shake is a damped kick in one direction. |
+| 🎮 Lightning strobed at ≈ 20 Hz; the tube flicker was random per frame | At most two pulses per strike, with strikes at least 7 s apart. The tube starters follow a fixed pattern that doesn't depend on frame rate. A new **Reduce flashing** setting (defaulting to the OS reduce-motion preference, as does Reduced motion) gives a soft single swell and no flicker. |
+| 🎮 No anti-aliasing with post-processing on | The scene renders into a 4× multisampled HDR target (2× on touch). |
+| 🎮 Hitches on the cat's eye and after restoring at the permit stage; GPU memory leak on quality change | The eye is compiled at start. `restore()` prepares the evening layers. `configure()` disposes every pass. The city layers are sized to what a 1080p screen resolves, and old layer sets free their canvases too. |
+| 🎮 Weaker GPUs, AO behind panels | Balanced runs AO at half resolution. AO is skipped while a panel, the terminal or the last shot covers the view. |
+| 🎮 Debug-looking highlight box | An amber **outline** (the box remains only on Low quality). |
+| 🎮 Blank page while loading; portrait tunnel vision; inventory over the joystick | A "Loading the lab…" screen. At least 62° horizontal field of view in portrait. The inventory moves to the top on touch devices. |
+| 🎮 Achievements not kept; "Best" list overflowed; no brightness | A trophy line on the title screen, a daily streak, a short best list, and a **brightness** setting. Debug runs no longer record best times. |
+| 🔐 The finale always had the same answer | The incomer is swapped in the classic room and **50/50 in daily rooms**; the e-mail says "check". The jumper label is neutral ("A (as found)" / "B"). |
+| 🔐 The checklist said "a hair above" but either side was accepted | Enforced: an island at or below grid frequency trips the **reverse-power relay**. |
+| 🔐 A failed trading day handed out the answer key | **Replay keeps the forecasts but re-rolls the real clouds and intraday prices**, with a fresh benchmark. |
+| 🔐 The drawer multiplier was always red; hint tier 2 skipped a step | Some daily rooms use a **×10** (brown) band, e.g. 470 Ω → 0470. The misreading nudge also catches "0472". Tier 2 now points at the sticky note and the poster. |
+| 🔐 Scenery that looks searchable said nothing | The filing cabinet, bin, boxes, desk papers and cork board answer with one line. The bin holds a soft clue about the third band. |
+| 🔐 More FW-BOARD variety; the scope showed ΔV/Δf on a dead island | Eight circuits, each with exactly one solution (tested). The Δ readouts blank out on a dead island. |
+| 🔬 Grey-H₂ rule counted PV surplus twice and used the intraday price | Surplus already charging the battery isn't "green" for the electrolyzer, and the renewable-hour test uses the **day-ahead** price. Both are tested. |
+| 🔬 Kranhäuser in the wrong place and 3× too tall; Colonius twice too tall; cruiser too close | The Kranhäuser moved up-river to the far left at their real angular size. The Colonius is the right height for 2.5 km. The cruiser is moored at the old-town quay, on the 600 m layer. |
+| 🔬 Door "3 kW", inverter cluster, merit order, cooling | The door start is ≈ 3 kVA per phase (inrush at a low power factor). INV-1 is the cluster master. The merit order comes from frequency-shift power control. The rig is water-cooled. |
+| 🧪 Rain fell in rows; glands missed their cables; the cat clipped the label; cables grazed the desk; the bolt was clipped; the animation jumped every 10 min | Each rain lane has its own phase. Each gland is placed where its cable crosses the face. The tail and paw hang clear of the label and edge. The desk-edge points were lifted. The bolt's random walk is kept inside its canvas. The animation clock wraps hourly. |
+| 🧪 The sun beam lit the booth through walls | It is now the shadow-casting window light: walls and the frame block it. |

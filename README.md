@@ -8,7 +8,7 @@ A first-person 3D escape room in the browser about **3-phase island grids, hydro
 - **Act 1 – The booth.** Bring a lab microgrid to life: a III-V PV test rig under a sun simulator, three single-phase grid-forming inverters, a 10 kWh battery, a PEM electrolyzer, a hydrogen tank and a fuel cell. Each phase is its own island, so the door motor only starts once **every** phase can carry 3 kW.
 - **Act 2 – The control room.** Crack Marco Volta's shell account using clues from the 3D world: a cat's collar tag, a lamp count, a binary LED row and a logic board.
 - **Act 3 – gridctl.** Validate a 24-hour dispatch against day-ahead price and weather forecasts. There are negative prices, evening spikes and forecast errors, and your plan is scored against a perfect-foresight optimum.
-- **Finale – Synchronise.** Insert the permit card, match voltage and frequency, spot the swapped incomer phases with the dark-lamp method, and close the tie breaker at 12 o'clock on the synchroscope. Then walk out into the dawn.
+- **Finale – Synchronise.** The city across the Rhine is already back on the grid; only your building is dark. Insert the permit card, match voltage, run the island a hair fast, check the incomer's phase rotation with the dark-lamp method, and close the tie breaker at 12 o'clock on the synchroscope. The storm passes, and you walk out onto the terrace as the sun sets behind the Dom.
 
 A **Classic room** follows the walkthrough below. A **Daily room** changes every code and clue each day.
 
@@ -27,7 +27,7 @@ A **Classic room** follows the walkthrough below. A **Daily room** changes every
 | Hint / Journal | `H` / `J` | 💡 / 📓 |
 | Menu & settings | `Esc` | ☰ |
 
-- **Settings:** look sensitivity, invert Y, FOV, volume, UI scale, reduced motion, a colour-blind-safe palette and render quality.
+- **Settings:** look sensitivity, invert Y, FOV, volume, UI scale, brightness, reduced motion, **reduce flashing** (soft single-pulse lightning, no fluorescent flicker), a colour-blind-safe palette and render quality. Reduced motion and reduce flashing follow the operating system's *reduce motion* preference by default.
 - **Saving:** progress is saved automatically in your browser, with one slot per room (classic and today's daily). Use **Continue** on the title screen.
 
 ## Deploy to GitHub Pages
@@ -67,7 +67,7 @@ npm run build
 
 Always run `npm run build` before committing, so that double-click and branch deploys get the new code.
 
-**Debug shortcuts:** `?skip=door|terminal|grid|sync` jumps ahead (these runs don't save). `?seed=<n>` plays a specific daily room. `window.__game` exposes state in the console.
+**Debug shortcuts:** `?skip=door|terminal|grid|sync` jumps ahead (these runs don't save and don't record best times or achievements). `?seed=<n>` plays a specific daily room. `window.__game` exposes state in the console.
 
 ### Project structure
 
@@ -75,6 +75,12 @@ Always run `npm run build` before committing, so that double-click and branch de
 |---|---|
 | `js/main.js` | game loop, stages, first-person controls, interaction and highlight, panels, hints, journal, inventory, timer, save/load, HUD |
 | `js/world.js` | builds both rooms, the corridor and all props from primitives and canvas textures |
+| `js/details.js` | set dressing: stopped mains clocks, extinguisher, boxes, duct, cable runs (device to gland/socket, lying on the floor), floor tape, desk clutter, contact shadows, dust motes |
+| `js/cat.js` | the cat on INV-2: swept-tube body with a painted tabby coat, fur shells, breathing, tail sway and ear flicks |
+| `js/materials.js` | procedural tileable surfaces (grimy plaster, worn floor tiles, drop ceiling, brushed metal, paint) and label weathering |
+| `js/cologne.js` | the Cologne skyline as depth layers (far city with Colonius and Kranhäuser, Altstadt with Groß St. Martin, the Dom and a river cruiser, Hohenzollern Bridge and KölnTriangle) in three states: storm blackout, storm with the city re-energised, and the evening after the storm with the sun setting behind the old town; lightning bolts, rain on the glass |
+| `js/outside.js` | the view through the window and the exit doorway: a shader that traces each pixel's line of sight into the layers, the reflecting Rhine, a wet terrace with railing, street lamps and trees, and rain at several depths, so the city has real parallax; cross-fades between the three states; the same shader renders the last shot out on the terrace |
+| `js/postfx.js` | post-processing: ambient occlusion, bloom, tone mapping, film grain and vignette (off on *Low* quality) |
 | `js/labsim.js` | Act 1 physics: per-phase dispatch, energy-conserving storage, trips, the door drive; device panels and tiered hints |
 | `js/terminal.js` | Act 2 shell: virtual filesystem, users, mail, `scada diag`, `gridctl` |
 | `js/gridgame.js` | Act 3: weather/price scenarios, hourly dispatch model, scoring, DP benchmark, dashboard |
@@ -102,13 +108,14 @@ Always run `npm run build` before committing, so that double-click and branch de
   - Devices: minimum loads for electrolyzer and fuel cell, battery wear cost, a daily H₂ price.
   - A simplified EU renewable-hydrogen (RFNBO) rule: H₂ from grid power only fetches the day's price in hours at or below 20 €/MWh. Otherwise it sells as grey H₂ at €2/kg.
   - The benchmark is a dynamic program over battery energy, replayed through the real hour model so it stays feasible.
-- **Synchronisation.** The synchroscope needle turns at the slip frequency. Each lamp sees |V_island − V_grid| across its breaker pole: all three go dark together when rotation and phase match, and they chase each other when the rotation is wrong. The lamps are filaments (brightness ∝ V², practically dark below 25 % voltage), so they look dark over about ±25°. That's why you close on the synchroscope, not the lamps.
+- **Outside.** The window looks west-north-west from the Deutz bank (the Dom is at ≈ 300°), so the storm clears into a sunset in the west, not a sunrise. The game starts at 18:40 on a late-September Friday and the emergency light lasts an hour, which fits a sunset at ≈ 19:30. The city comes back on *before* the finale: you can only synchronise to a grid that is already live. Thunder arrives distance ÷ 343 m/s after the flash (strikes 2–8 km away). The regional train stranded on the Hohenzollern Bridge is stopped by a storm fault on the overhead line (DB's 15 kV / 16.7 Hz traction grid is separate from the city's).
+- **Synchronisation.** The synchroscope needle turns at the slip frequency. Each lamp sees |V_island − V_grid| across its breaker pole: all three go dark together when rotation and phase match, and they chase each other when the rotation is wrong. The lamps are filaments (brightness ∝ V², practically dark below 25 % voltage), so they look dark over about ±25°. That's why you close on the synchroscope, not the lamps. Close with the island a hair *above* grid frequency: if it were slower, the grid would push power into the island inverters (reverse power) the moment Q0 closes. In the classic room the storm crew swapped two incomer phases; in daily rooms it varies, so read the lamps.
 
 The review notes behind many of these choices are in [REVIEWS.md](REVIEWS.md).
 
 ## Credits
 
-Three.js (MIT, © three.js authors), bundled into `dist/game.js`. Everything else, including graphics and sound, is procedurally generated at runtime.
+Three.js (MIT, © three.js authors), bundled into `dist/game.js`. Everything else, including the textures, the Cologne skyline and all sound, is procedurally generated at runtime; there are no image or audio assets.
 
 ---
 
@@ -138,5 +145,5 @@ gridctl
 ```
 **gridctl:** at negative prices, curtail, charge and run the electrolyzer. Run the electrolyzer on PV surplus below its break-even price, but not on night grid power (that H₂ is grey). Around the evening peak, discharge the battery, and run the fuel cell above its break-even. You need at least 55 % of the benchmark's extra profit. The break-evens are shown in the forecast box. The advisor costs 0:15 per use.
 
-**Tie panel Q0** (next to the exit): insert the **permit card**; island **231 V**, **50.07 Hz** (slightly faster than the grid's 50.03). The lamps chase each other, so press **Swap L2 ↔ L3** once; now they go dark together. Press **CLOSE** (Space) when the needle is in the green sector. Then walk out through the exit.
+**Tie panel Q0** (next to the exit): insert the **permit card**; island **231 V**, **50.07 Hz** (slightly faster than the grid's 50.03). The lamps chase each other, so press **Swap L2 ↔ L3** once; now they go dark together. Press **CLOSE** (Space) when the needle is in the green sector. Then walk out through the exit and down the corridor.
 </details>

@@ -1,5 +1,7 @@
 // Player settings, persisted in localStorage.
 const KEY = 'ple-settings';
+// players who asked their OS for less motion also get calmer lightning and no light flicker by default
+const osReduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export const DEFAULTS = {
   sens: 1.0,            // mouse / touch look sensitivity multiplier
@@ -7,7 +9,9 @@ export const DEFAULTS = {
   fov: 72,
   volume: 0.7,
   uiScale: 1,
-  reducedMotion: false, // no head bob / camera shake
+  reducedMotion: osReduce, // no head bob / camera shake
+  reduceFlashing: osReduce, // soft single-pulse lightning, no fluorescent flicker (photosensitivity)
+  brightness: 1,        // exposure multiplier (the game is dark on purpose; some screens need help)
   palette: 'standard',  // phase colours: standard | colorblind
   quality: 'auto',      // pixel ratio: low | auto | high
 };
@@ -28,7 +32,9 @@ export function settingsHtml(s) {
     ${range('fov', 'Field of view', 55, 100, 1, (v) => v + '°')}
     ${range('volume', 'Volume', 0, 1, 0.05, (v) => Math.round(v * 100) + ' %')}
     ${range('uiScale', 'UI scale', 0.8, 1.5, 0.05, (v) => Math.round(v * 100) + ' %')}
+    ${range('brightness', 'Brightness', 0.7, 1.6, 0.05, (v) => Math.round(v * 100) + ' %')}
     ${check('reducedMotion', 'Reduced motion (no head bob / shake)')}
+    ${check('reduceFlashing', 'Reduce flashing (lightning, flicker)')}
     ${select('palette', 'Phase colours', [['standard', 'Standard (red / yellow / blue)'], ['colorblind', 'Colour-blind safe (Okabe–Ito)']])}
     ${select('quality', 'Render quality', [['low', 'Low (fast)'], ['auto', 'Balanced'], ['high', 'High (sharp)']])}
   </div>`;
@@ -41,7 +47,7 @@ export function bindSettings(root, s, onChange) {
       const k = el.dataset.set;
       s[k] = el.type === 'checkbox' ? el.checked : el.tagName === 'SELECT' ? el.value : Number(el.value);
       const out = el.parentElement.querySelector('output');
-      if (out) out.textContent = { sens: (v) => v.toFixed(1) + '×', fov: (v) => v + '°', volume: (v) => Math.round(v * 100) + ' %', uiScale: (v) => Math.round(v * 100) + ' %' }[k]?.(s[k]) ?? s[k];
+      if (out) out.textContent = { sens: (v) => v.toFixed(1) + '×', fov: (v) => v + '°', volume: (v) => Math.round(v * 100) + ' %', uiScale: (v) => Math.round(v * 100) + ' %', brightness: (v) => Math.round(v * 100) + ' %' }[k]?.(s[k]) ?? s[k];
       saveSettings(s);
       onChange(s);
     });

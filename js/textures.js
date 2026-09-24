@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { weather } from './materials.js';
 
 /** Font stacks with cross-platform fallbacks (canvas text would otherwise fall back to a serif font). */
 export const FONT = {
@@ -37,7 +38,7 @@ export function fitFont(ctx, text, maxW) {
 }
 
 /** Simple sign/label: array of lines, each either a string or {t, font, color}. */
-export function labelTex(lines, { w = 512, h = 256, bg = '#f2f2ee', fg = '#111', font = `bold 44px ${FONT.sans}`, border = null, align = 'center' } = {}) {
+export function labelTex(lines, { w = 512, h = 256, bg = '#f2f2ee', fg = '#111', font = `bold 44px ${FONT.sans}`, border = null, align = 'center', weathered = 0.6 } = {}) {
   return canvasTex(w, h, (ctx) => {
     ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
     if (border) { ctx.strokeStyle = border; ctx.lineWidth = 10; ctx.strokeRect(5, 5, w - 10, h - 10); }
@@ -49,6 +50,7 @@ export function labelTex(lines, { w = 512, h = 256, bg = '#f2f2ee', fg = '#111',
       fitFont(ctx, o.t, w - (border ? 44 : 28));        // never clip: shrink the font until the line fits
       ctx.fillText(o.t, align === 'center' ? w / 2 : 24, step * (i + 1));
     });
+    if (weathered) weather(ctx, w, h, weathered, lines.length * 31 + w);   // printed signs age: speckle, scratches, grimy edges
   });
 }
 
@@ -84,6 +86,7 @@ export function pvCellTex() {
       ctx.strokeStyle = 'rgba(200,210,230,.35)'; ctx.lineWidth = 1;
       for (let k = 1; k < 4; k++) { ctx.beginPath(); ctx.moveTo(x + k * cw / 4, y + 2); ctx.lineTo(x + k * cw / 4, y + ch - 2); ctx.stroke(); }
     }
+    weather(ctx, w, h, 0.7, 5);   // dust on the glass
   });
 }
 

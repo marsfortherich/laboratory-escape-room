@@ -238,3 +238,15 @@ canvas { touch-action: none; }
 @media (pointer: coarse) { #keys { display: none; } }
 body.touch .kbd-hint { display: none; }
 @media (prefers-reduced-motion: reduce) { #jBadge.new, #timer.pen { animation: none; } }
+
+/* the last shot fades to warm white before the end card; one-line captions instead of narration toasts */
+#fade { position: fixed; inset: 0; background: #fff0d6; opacity: 0; pointer-events: none; transition: opacity 1.4s ease; z-index: 8; }
+#fade.on { opacity: 1; }
+#caption { position: fixed; left: 50%; top: 62%; transform: translateX(-50%); max-width: min(720px, 90vw); text-align: center; z-index: 7;
+  font: 500 19px "Segoe UI", "Helvetica Neue", Roboto, Arial, sans-serif; color: #f1ead8; text-shadow: 0 2px 8px #000, 0 0 2px #000;
+  opacity: 0; transition: opacity 1.2s ease; pointer-events: none; letter-spacing: .02em; }
+#caption.show { opacity: 1; }
+.trophies { color: #e8c86a; }
+body.touch #inv { bottom: auto; top: 58px; }                 /* keep the inventory away from the joystick and RUN */
+#loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #05080c; color: #8ea3b8;
+  font: 600 16px "Segoe UI", sans-serif; letter-spacing: .2em; z-index: 30; }

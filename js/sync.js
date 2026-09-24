@@ -3,7 +3,9 @@
 // verify phase rotation with the three "dark lamps" (dark together = same sequence, chasing = wrong),
 // then close the breaker when the synchroscope needle passes 12 o'clock.
 // The island's own rotation is fixed (it started the booth-door motor forwards); after the storm repair the
-// incoming grid cable at Q0 was re-terminated with L2/L3 swapped — the player has to spot and fix that.
+// incoming grid cable at Q0 may have been re-terminated with L2/L3 swapped (always in the classic room, on some days
+// in daily rooms) — the player has to read the lamps to know.
+// Close with the island a hair FAST: an island slower than the grid would be motored (reverse power) the moment Q0 closes.
 // Lamps are filaments: brightness ∝ V², practically dark below ~25 % voltage (so close on the scope, not the lamps).
 
 const SEQ = { CW: [0, -120, -240], CCW: [0, -240, -120] };   // L1, L2, L3 phase angles
@@ -16,7 +18,7 @@ export class SyncSim {
   constructor(puzzle) {
     this.grid = { V: puzzle.gridV, f: puzzle.gridF };
     this.isl = { V: 222, f: 49.8 };
-    this.swapped = true;     // incomer terminals L2/L3 swapped at Q0
+    this.swapped = puzzle.swapped ?? true;   // incomer terminals L2/L3 swapped at Q0
     this.islandOn = true;    // set by the game each frame: is the lab cluster energised?
     this.phi = 140;          // island angle relative to grid, degrees
     this.closed = false;
@@ -53,6 +55,7 @@ export class SyncSim {
     if (this.swapped) return { ok: false, why: 'PHASE ROTATION MISMATCH — the incomer arrives as L1-L3-L2. Two poles closed onto 400 V: the inverters hit their current limit within milliseconds and Q0 tripped. (The lamps were chasing each other instead of going dark together.)' };
     if (Math.abs(dV) > SYNC_TOL.V_REL * this.grid.V) return { ok: false, why: `VOLTAGE MISMATCH ${dV > 0 ? '+' : ''}${dV.toFixed(0)} V — a reactive-current surge drove the island inverters into current limit; Q0 tripped.` };
     if (Math.abs(dF) > SYNC_TOL.F) return { ok: false, why: `SLIP TOO LARGE (${dF > 0 ? '+' : ''}${dF.toFixed(2)} Hz) — the island inverters could not be pulled into step; overcurrent trip.` };
+    if (dF <= 0) return { ok: false, why: `ISLAND ${dF < 0 ? 'SLOWER THAN' : 'EXACTLY AT'} GRID FREQUENCY (${dF.toFixed(2)} Hz) — the grid would push power INTO the island inverters the moment Q0 closes. Reverse-power relay tripped. (Checklist: a hair ABOVE the grid.)` };
     if (Math.abs(this.phi) > SYNC_TOL.PHI) return { ok: false, why: `OUT OF PHASE by ${Math.abs(this.phi).toFixed(0)}° — ${(460 * Math.sin(Math.abs(this.phi) * Math.PI / 360)).toFixed(0)} V across each pole, inverters at current limit, Q0 tripped instantly. BANG.` };
     return { ok: true };
   }
@@ -100,7 +103,7 @@ export function drawSyncScope(ctx, w, h, sync, { compact = false } = {}) {
   const dV = sync.isl.V - sync.grid.V, dF = sync.isl.f - sync.grid.f;
   const rows = [
     ['', 'GRID', 'ISLAND'],
-    ['V', `${sync.grid.V} V`, sync.islandOn ? `${sync.isl.V} V` : '— V'],
+    ['V', `${sync.grid.V} V`, sync.islandOn ? `${sync.isl.V} V` : '— V'],   // (Δ values below also blank out on a dead island)
     ['f', `${sync.grid.f.toFixed(2)} Hz`, sync.islandOn ? `${sync.isl.f.toFixed(2)} Hz` : '— Hz'],
   ];
   rows.forEach((r, i) => {
@@ -109,7 +112,7 @@ export function drawSyncScope(ctx, w, h, sync, { compact = false } = {}) {
     ctx.fillStyle = i === 0 ? '#8ea3b8' : '#e6edf3'; ctx.fillText(r[1], w * 0.6, y); ctx.fillText(r[2], w * 0.8, y);
   });
   // plain differences, no pass/fail colouring: the checklist says what is acceptable
-  ctx.fillStyle = '#c8d4e0'; ctx.fillText(`ΔV ${dV >= 0 ? '+' : ''}${dV} V`, w * 0.56, h * 0.72);
-  ctx.fillText(`Δf ${dF >= 0 ? '+' : ''}${dF.toFixed(2)} Hz`, w * 0.78, h * 0.72);
+  ctx.fillStyle = '#c8d4e0'; ctx.fillText(sync.islandOn ? `ΔV ${dV >= 0 ? '+' : ''}${dV} V` : 'ΔV —', w * 0.56, h * 0.72);
+  ctx.fillText(sync.islandOn ? `Δf ${dF >= 0 ? '+' : ''}${dF.toFixed(2)} Hz` : 'Δf —', w * 0.78, h * 0.72);
   ctx.fillStyle = sync.closed ? '#3ecf7a' : '#ffd24a'; ctx.fillText(sync.closed ? 'Q0 CLOSED — CONNECTED' : (sync.islandOn ? `Δφ ${sync.phi >= 0 ? '+' : ''}${sync.phi.toFixed(0)}°` : 'ISLAND BUS DEAD'), w * 0.56, h * 0.9);
 }

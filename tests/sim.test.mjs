@@ -1,7 +1,7 @@
 // Headless tests for the pure simulation modules (no browser needed): `npm test`
 import assert from 'node:assert/strict';
 import { LabSim, C } from '../js/labsim.js';
-import { makeDay, simHour, baseline, benchmark, score, greyPenalty, CFG } from '../js/gridgame.js';
+import { makeDay, simHour, baseline, benchmark, score, greyPenalty, rerollActuals, CFG } from '../js/gridgame.js';
 import { makePuzzle, solve, CIRCUITS } from '../js/puzzle.js';
 import { SyncSim } from '../js/sync.js';
 
@@ -17,6 +17,20 @@ test('every circuit has exactly one solution', () => CIRCUITS.forEach((c, i) => 
 test('classic room matches the README walkthrough', () => {
   assert.equal(P.year, 1987); assert.equal(P.drawerCode, '4700'); assert.equal(P.lamps, 6);
   assert.equal(P.userPw, 'yadaraf'); assert.equal(P.rootPw, 'GRID150H2'); assert.equal(P.boardSolution, '1001');
+});
+test('drawer code = resistor value (digit, digit, multiplier) in every room', () => {
+  for (const s of [0, ...Array.from({ length: 200 }, (_, i) => 20260101 + i)]) {
+    const p = makePuzzle(s), [a, b, m] = p.bands;
+    assert.equal(Number(p.drawerCode), (10 * a + b) * 10 ** m, `seed ${s}`);
+    assert.notEqual(p.drawerCode, `${a}${b}${m}0`, `seed ${s}: the "third band as digit" misreading must not also be the answer`);
+  }
+});
+test('daily rooms vary the finale and the multiplier band', () => {
+  const rooms = Array.from({ length: 120 }, (_, i) => makePuzzle(20260101 + i));
+  assert.ok(rooms.some((p) => p.swapped) && rooms.some((p) => !p.swapped), 'both incomer states occur');
+  assert.ok(rooms.some((p) => p.resMult === 1) && rooms.some((p) => p.resMult === 2), '×10 and ×100 rooms occur');
+  assert.ok(new Set(rooms.map((p) => p.circuit)).size === CIRCUITS.length, 'every FW-BOARD circuit is used');
+  assert.equal(P.swapped, true, 'classic room: the incomer is swapped (README walkthrough)');
 });
 test('daily rooms are deterministic and valid', () => {
   for (let s = 20260101; s < 20260140; s++) {
@@ -121,6 +135,12 @@ test('closing rules', () => {
   s.phi = 12; assert.equal(s.check().ok, false, '±10° like the checklist');
   s.phi = 0; s.isl.V = P.gridV + 5; assert.equal(s.check().ok, false, '±2 % like the checklist');
   s.isl.V = P.gridV; s.swapped = true; assert.equal(s.check().ok, false);
+  s.swapped = false; s.isl.f = P.gridF - 0.04; assert.equal(s.check().ok, false, 'island slower than the grid → reverse power');
+  s.isl.f = P.gridF; assert.equal(s.check().ok, false, 'exactly at grid frequency → not "a hair above"');
+});
+test('the incomer state follows the room', () => {
+  const daily = Array.from({ length: 60 }, (_, i) => makePuzzle(20260301 + i)).find((p) => !p.swapped);
+  assert.equal(new SyncSim(daily).swapped, false);
 });
 
 console.log('Grid dispatch');
@@ -136,6 +156,22 @@ test('grid-powered electrolysis outside renewable hours only earns the grey H₂
   assert.equal(greyPenalty(d, 200, 500, 100, 80), 0, 'covered by PV surplus');
   assert.equal(greyPenalty(d, 200, 0, 100, 15), 0, 'renewable hour (≤ 20 €/MWh)');
   assert.ok(Math.abs(greyPenalty(d, 200, 0, 100, 80) - 200 / CFG.ELZ_KWH_KG * (6 - CFG.H2_GREY)) < 1e-9);
+  assert.ok(greyPenalty(d, 200, 314, 100, 80, 250) > 0, 'PV surplus already charging the battery cannot also be "green" for the electrolyzer');
+});
+test('the renewable-hour rule uses the day-ahead price', () => {
+  const d = { ...makeDay(4), h2Price: 6 };
+  const h = d.priceF.findIndex((p, i) => p > CFG.RFNBO_MAX && d.pvA[i] < 1);
+  if (h < 0) return;
+  const lowIntraday = { ...d, priceA: d.priceA.map((p, i) => (i === h ? 5 : p)) };
+  const r = simHour(lowIntraday, h, { soc: 0.5, h2: 20 }, { bat: 0, elz: 100, fc: 0, curt: 0 });
+  assert.ok(r.grey > 0, 'a cheap intraday price does not turn a normal day-ahead hour into a renewable one');
+});
+test('"Replay this day" keeps the forecast but re-rolls reality', () => {
+  const d = makeDay(2026, 0), v = rerollActuals(d, 1);
+  assert.deepEqual(v.priceF, d.priceF); assert.deepEqual(v.pvF, d.pvF); assert.deepEqual(v.load, d.load);
+  assert.notDeepEqual(v.priceA, d.priceA);
+  assert.deepEqual(rerollActuals(d, 1).priceA, v.priceA, 'deterministic, so saves restore the same replay');
+  assert.ok(benchmark(v).value >= baseline(v) - 1e-6);
 });
 test('minimum loads are respected', () => {
   const d = makeDay(42);

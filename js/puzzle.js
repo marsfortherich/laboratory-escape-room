@@ -6,6 +6,11 @@ export const CIRCUITS = [
   { terms: [{ g: 'AND', a: 'A', b: '!B' }, { g: 'XOR', a: 'C', b: 'D' }, { g: 'OR', a: 'B', b: 'D' }] },   // 1001
   { terms: [{ g: 'XOR', a: 'A', b: 'B' }, { g: 'AND', a: 'B', b: 'D' }, { g: 'NOT', a: 'C' }] },          // 0101
   { terms: [{ g: 'AND', a: 'A', b: 'C' }, { g: 'NOR', a: 'B', b: 'D' }] },                                // 1010
+  { terms: [{ g: 'NAND', a: 'B', b: 'C' }, { g: 'NOR', a: 'A', b: 'D' }, { g: 'XOR', a: 'B', b: 'D' }] },    // 0100
+  { terms: [{ g: 'XOR', a: '!A', b: 'C' }, { g: 'NAND', a: 'B', b: 'C' }, { g: 'AND', a: 'A', b: 'D' }] },   // 1011
+  { terms: [{ g: 'XOR', a: 'B', b: 'D' }, { g: 'NOR', a: 'A', b: 'D' }, { g: 'NAND', a: '!C', b: '!D' }] },  // 0110
+  { terms: [{ g: 'AND', a: 'A', b: 'D' }, { g: 'NOR', a: 'C', b: '!D' }, { g: 'XOR', a: 'B', b: 'C' }] },    // 1101
+  { terms: [{ g: 'AND', a: 'C', b: 'D' }, { g: 'XOR', a: 'A', b: 'C' }, { g: 'NOR', a: 'A', b: 'B' }] },     // 0011
 ];
 
 const bit = (bits, s) => (s[0] === '!' ? 1 - bits['ABCD'.indexOf(s[1])] : bits['ABCD'.indexOf(s)]);
@@ -39,19 +44,23 @@ const F1 = ['GRID', 'VOLT', 'WATT', 'AMPS', 'OHMS'];
 const F3 = ['H2', 'PV', 'AC', 'DC'];
 const E12 = [10, 12, 15, 18, 22, 27, 33, 39, 47, 56, 68, 82];
 export const RES_COLORS = ['black', 'brown', 'red', 'orange', 'yellow', 'green', 'blue', 'violet', 'grey', 'white'];
+export const RES_MULT = ['×1', '×10', '×100', '×1 000', '×10 000', '×100 000', '×1 M', '×10 M', '×100 M', '×1 G'];
 export const RES_HEX = ['#111', '#6b3a1e', '#d0231f', '#f07f16', '#f5d10f', '#2c9a3a', '#2455c9', '#7b3fb0', '#8a8a8a', '#f4f4f4'];
 
 export function makePuzzle(seed = 0) {
   let p;
   if (!seed) {
-    p = { seed: 0, year: 1987, cat: 'Faraday', lamps: 6, res: 47, resMult: 2, bin: 150, circuit: 0, f1: 'GRID', f3: 'H2' };
+    p = { seed: 0, year: 1987, cat: 'Faraday', lamps: 6, res: 47, resMult: 2, bin: 150, circuit: 0, f1: 'GRID', f3: 'H2', swapped: true };
   } else {
     const r = rng(Math.imul(seed ^ 0x9e3779b9, 2654435761) ^ (seed >>> 16));
     const pick = (a) => a[Math.floor(r() * a.length)];
     p = {
       seed, year: 1975 + Math.floor(r() * 30), cat: pick(CATS), lamps: 4 + Math.floor(r() * 5),
-      res: pick(E12), resMult: 2, bin: 129 + Math.floor(r() * 126), circuit: Math.floor(r() * 3), f1: pick(F1), f3: pick(F3),
+      res: pick(E12), resMult: 2, bin: 129 + Math.floor(r() * 126), circuit: Math.floor(r() * CIRCUITS.length), f1: pick(F1), f3: pick(F3),
     };
+    // drawn last so the earlier values of a daily room stay the same
+    p.swapped = r() < 0.5;                 // was the incomer re-terminated wrongly? (the lamps tell)
+    if (r() < 0.3) p.resMult = 1;          // some days the multiplier band is brown (×10): e.g. 470 Ω → 0470
   }
   p.drawerCode = String(p.res * 10 ** p.resMult).padStart(4, '0');
   p.bands = [Math.floor(p.res / 10), p.res % 10, p.resMult];

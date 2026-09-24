@@ -7,7 +7,7 @@ export const CFG = {
   ELZ_P: 200, ELZ_MIN: 20, ELZ_KWH_KG: 55,
   FC_P: 150, FC_MIN: 15, FC_KWH_KG: 18,
   H2_MAX: 150,                       // kg
-  H2_GREY: 2, RFNBO_MAX: 20,         // €/kg for non-renewable H₂; grid hours ≤ 20 €/MWh count as renewable (EU RFNBO, simplified)
+  H2_GREY: 2, RFNBO_MAX: 20,         // €/kg for non-renewable H₂; hours with a DAY-AHEAD price ≤ 20 €/MWh count as renewable (EU RFNBO, simplified)
   LIM: 300,                          // kW grid connection (import & export)
   FEE: 40,                           // €/MWh grid fees on imports
   SOC0: 0.5, H2_0: 20,
@@ -58,16 +58,40 @@ export function makeDay(seed, kindIdx) {
   if (r() < 0.75) { const h = 17 + Math.floor(r() * 5); priceA[h] = Math.round((priceA[h] + 120 + r() * 220) * 10) / 10; }
   if (r() < 0.4) { const h = 10 + Math.floor(r() * 5); priceA[h] = Math.round((priceA[h] - 40 - r() * 60) * 10) / 10; }
   const h2Price = Math.round((3 + r() * 5) * 2) / 2;                 // 3.0 … 8.0 €/kg
-  return { seed, kind: kind.name, cloudF, cloudA, pvF, pvA, load, priceF, priceA, h2Price };
+  return { seed, kind: kind.name, cloudF, cloudA, pvF, pvA, load, priceF, priceA, h2Price, variant: 0 };
+}
+
+/**
+ * Same forecasts, different reality: re-rolls the intraday prices and real clouds. "Replay this day" uses it, so a
+ * replay tests forecasting again instead of letting the player copy the benchmark from the review.
+ */
+export function rerollActuals(day, variant) {
+  if (!variant) return day;
+  const r = mulberry32(day.seed * 7919 + 17 + variant * 104729);
+  const gauss = () => { const u = 1 - r(), v = r(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+  const cloudA = [], pvA = [], priceA = [];
+  let err = 0;
+  for (let h = 0; h < 24; h++) {
+    err = 0.7 * err + Math.sqrt(1 - 0.49) * gauss() * 0.18;
+    cloudA[h] = clamp(day.cloudF[h] + err, 0, 1);
+    pvA[h] = CFG.PV_KWP * CFG.PR * clearSky(h) * kc(cloudA[h]);
+    priceA[h] = Math.round((day.priceF[h] + gauss() * 10 + 120 * (cloudA[h] - day.cloudF[h]) * clearSky(h)) * 10) / 10;
+  }
+  if (r() < 0.75) { const h = 17 + Math.floor(r() * 5); priceA[h] = Math.round((priceA[h] + 120 + r() * 220) * 10) / 10; }
+  if (r() < 0.4) { const h = 10 + Math.floor(r() * 5); priceA[h] = Math.round((priceA[h] - 40 - r() * 60) * 10) / 10; }
+  return { ...day, cloudA, pvA, priceA, variant };
 }
 
 // ------------------------------------------------------------ physics / economics of one hour
 const money = (net, price) => (net >= 0 ? net * price : net * (price + CFG.FEE)) / 1000;
 const minLoad = (v, min) => (v > 0 && v < min ? min : v);
-/** H₂ made from grid power outside renewable hours only fetches the grey price: returns the € lost vs. the day's H₂ price. */
-export function greyPenalty(day, elz, pv, load, price) {
+/**
+ * H₂ made from grid power outside renewable hours only fetches the grey price: returns the € lost vs. the day's H₂ price.
+ * Renewable = the hour's DAY-AHEAD price is ≤ RFNBO_MAX, or own PV surplus left after the load and battery charging.
+ */
+export function greyPenalty(day, elz, pv, load, priceDA, charge = 0) {
   if (elz <= 0 || day.h2Price <= CFG.H2_GREY) return 0;
-  const green = price <= CFG.RFNBO_MAX ? elz : Math.min(elz, Math.max(0, pv - load));
+  const green = priceDA <= CFG.RFNBO_MAX ? elz : Math.min(elz, Math.max(0, pv - load - charge));
   return (elz - green) / CFG.ELZ_KWH_KG * (day.h2Price - CFG.H2_GREY);
 }
 /** Break-even prices (€/MWh) for today's H₂ value. */
@@ -107,7 +131,7 @@ export function simHour(day, h, st, set, forecast = false) {
     notes.push(`export limit (${lost.toFixed(0)} kW PV lost)`);
   }
   const wear = Math.max(0, bat) * CFG.BAT_WEAR / 1000;
-  const grey = greyPenalty(day, elz, pv, load, price);
+  const grey = greyPenalty(day, elz, pv, load, day.priceF[h], Math.max(0, -bat));
   if (grey > 0.5) notes.push(`grey H₂ −€${grey.toFixed(0)}`);
   const eur = money(net, price) - wear - grey;
   const Eafter = bat > 0 ? E - bat / CFG.BAT_EFF : E - bat * CFG.BAT_EFF;
@@ -156,7 +180,7 @@ export function benchmark(day, data = { pv: day.pvA, price: day.priceA }) {
         if (net < -CFG.LIM) continue;
         if (net > CFG.LIM) net = CFG.LIM;
         const v = money(net, data.price[h]) - Math.max(0, b) * CFG.BAT_WEAR / 1000 + (elz / CFG.ELZ_KWH_KG - fc / CFG.FC_KWH_KG) * day.h2Price
-          - greyPenalty(day, elz, data.pv[h] * (1 - c / 100), day.load[h], data.price[h]);
+          - greyPenalty(day, elz, data.pv[h] * (1 - c / 100), day.load[h], day.priceF[h], Math.max(0, -b));
         if (v > best) { best = v; bestA = { elz, fc, curt: c }; }
       }
       inner[h][d] = best; arg[h][d] = bestA;
@@ -211,6 +235,13 @@ export class GridGame {
     this.base = baseline(this.day);
     this.bench = benchmark(this.day);
   }
+  /** Replay the same forecasts with a new reality (and a fresh baseline / benchmark for it). */
+  replay(variant = (this.day.variant || 0) + 1) {
+    this.day = rerollActuals(makeDay(this.seed, this.seed === 2026 ? 0 : undefined), variant);
+    this.reset();
+    this.base = baseline(this.day);
+    this.bench = benchmark(this.day);
+  }
   reset() {
     this.st = { soc: CFG.SOC0, h2: CFG.H2_0 };
     this.h = 0; this.cash = 0; this.log = [];
@@ -220,11 +251,12 @@ export class GridGame {
     this.advisorUsed = false;
   }
 
-  serialize() { return { seed: this.seed, dayNo: this.dayNo, log: this.log, st: this.st, h: this.h, cash: this.cash, set: this.set, permit: this.permit }; }
+  serialize() { return { seed: this.seed, variant: this.day.variant, dayNo: this.dayNo, log: this.log, st: this.st, h: this.h, cash: this.cash, set: this.set, permit: this.permit }; }
   restore(o) {
     if (!o) return;
     this.dayNo = o.dayNo - 1;
     this.newDay(o.seed, o.seed === 2026 ? 0 : undefined);
+    if (o.variant) this.replay(o.variant);
     Object.assign(this, { log: o.log, st: o.st, h: o.h, cash: o.cash, set: o.set, permit: o.permit, finished: o.h >= 24 });
   }
 
@@ -447,7 +479,7 @@ export class GridGame {
       </div>
       <p class="note">${res.won
         ? '✔ The grid operator accepts the schedule and issues a <b>reconnection permit</b>. Synchronise the lab with the grid at the tie panel next to the exit.'
-        : `The operator needs ≥ ${CFG.WIN_RATIO * 100} %. "Review the day" compares every hour with the benchmark (Bench € column, dashed SOC line).`}</p>
+        : `The operator needs ≥ ${CFG.WIN_RATIO * 100} %. "Review the day" compares every hour with the benchmark (Bench € column, dashed SOC line). "Replay" keeps the forecasts, but the real clouds and intraday prices come out differently.`}</p>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn" id="mReview">Review the day</button>
         <button class="btn" id="mRetry">Replay this day</button>
@@ -457,7 +489,7 @@ export class GridGame {
     this.$('gModal').classList.remove('hidden');
     const hide = () => this.$('gModal').classList.add('hidden');
     card.querySelector('#mReview').onclick = hide;
-    card.querySelector('#mRetry').onclick = () => { hide(); this.reset(); this.render(); };
+    card.querySelector('#mRetry').onclick = () => { hide(); this.replay(); this.render(); };
     card.querySelector('#mNew').onclick = () => { hide(); this.newDay(Math.floor(Math.random() * 1e6)); this.render(); };
     if (res.won) card.querySelector('#mWin').onclick = () => { hide(); this.permit = true; this.onWin(res); };
   }

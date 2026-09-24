@@ -3,13 +3,17 @@
 // Physics model (reviewed by our resident science nerd):
 // • Three single-phase grid-forming inverters (a "cluster", like SMA Sunny Island units) each form ONE phase.
 //   The phases are not coupled: a load on L2 can only be supplied by sources on L2.
+// • INV-1 is the cluster master: INV-2/3 follow its clock over the cluster sync link, 120° apart (that is why the
+//   door motor turns forwards). Two grid-forming units on ONE phase would share load by droop; here the cluster
+//   controller shifts their frequency setpoints (frequency-shift power control) to get a merit order instead.
 // • In an island, generation = load at every instant. Sources only deliver what is consumed
 //   (merit order: PV → battery → fuel cell); storage drains by DELIVERED power, so energy is conserved.
 // • If demand on a phase exceeds what its inverters can deliver, they hit their current limit, the
 //   voltage collapses and the under-voltage relay trips that phase.
 // • One lab clock for everything: time-lapse ×360 (10 real seconds = 1 lab hour) — except the door-motor
 //   start, which takes a few real seconds and therefore runs in real time (×1).
-// • The door is driven by a 3-phase induction motor: starting it loads EVERY phase with 3 kW for 5 s.
+// • The door is driven by a 3-phase induction motor: starting it loads EVERY phase with ≈ 3 kVA for 5 s (inrush at a
+//   low power factor — the inverters' current limit is what counts; the model books it as 3 kW of headroom).
 
 export const PH = ['L1', 'L2', 'L3'];
 export const PALETTES = {
@@ -174,8 +178,12 @@ export class LabSim {
       'Meanwhile, solve the valve problem: the H₂ tank has no handwheel.'] };
     if (!s.h2.wheel) return { id: 'wheel', tiers: [
       'The fuel cell needs hydrogen from the tank — but can you actually open the valve?',
-      'The handwheel was removed ("M.V."). Marco keeps things in the workbench drawer — it has a 4-digit lock.',
-      `The resistor on the bench: ${P.bands.map((b, i) => (i < 2 ? ['black', 'brown', 'red', 'orange', 'yellow', 'green', 'blue', 'violet', 'grey', 'white'][b] : '×10^' + b)).join(', ')} → ${P.drawerCode} Ω. Drawer code ${P.drawerCode}. Then use the handwheel on the tank.`] };
+      'The handwheel was removed ("M.V."). The workbench drawer has a 4-digit lock: the sticky note on the bench resistor says the code is its value in Ω, and the colour-code poster on the back wall decodes the bands.',
+      (() => {
+        const names = ['black', 'brown', 'red', 'orange', 'yellow', 'green', 'blue', 'violet', 'grey', 'white'];
+        const [a, b, m] = P.bands;
+        return `The resistor on the bench: ${names[a]} (${a}), ${names[b]} (${b}), ${names[m]} = multiplier ×${10 ** m} → ${a}${b} × ${10 ** m} = ${P.drawerCode} Ω. Drawer code ${P.drawerCode}. Then use the handwheel on the tank.`;
+      })()] };
     if (!s.fc.running || !(s.inv.fc.on && s.inv.fc.ph >= 0)) return { id: 'fc', tiers: [
       'Hydrogen in a tank does not make electricity by itself.',
       'Open the H₂ valve, start the fuel cell stack, and give its inverter (INV-3) a phase.',
@@ -207,7 +215,7 @@ export class LabSim {
       title: 'Sun Simulator · Control Keypad',
       controls: () => s.sun.unlocked
         ? `<div class="ctl"><label>Lamp array</label>${onoff('sun', s.sun.on)}</div>
-           <p class="note">Xenon arc lamps giving 3 suns (3000 W/m²) on the test rig. Lamp input ≈ ${C.LAMP_KW} kW from the building's emergency generator ("temporarily" — M.V.). Lamp → light → PV → AC is only ≈ 9 % efficient.</p>`
+           <p class="note">Xenon arc lamps giving 3 suns (3000 W/m²) on the test rig. Lamp input ≈ ${C.LAMP_KW} kW from the building's emergency generator ("temporarily" — M.V.). Lamp → light → PV → AC is only ≈ 9 % efficient; the water-cooled rig has to shed the other ≈ 12 kW as heat.</p>`
         : `<p class="note">SYSTEM LOCKED — enter 4-digit PIN.<span class="kbd-hint"> (Number keys work too.)</span></p>
            <div class="keypad">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => `<button class="btn" data-act="pin:${d}">${d}</button>`).join('')}
            <button class="btn warn" data-act="pin:C">C</button><button class="btn" data-act="pin:0">0</button><button class="btn on" data-act="pin:OK">OK</button></div>`,
@@ -239,7 +247,7 @@ LAMP INPUT ${s.sun.on ? C.LAMP_KW : 0} kW (emergency generator)`)
       title: 'INV-1 · Hybrid PV Inverter (6 kVA, η 97 %)',
       controls: () => `<div class="ctl"><label>Power</label>${onoff('invpv', s.inv.pv.on)}</div>
         <div class="ctl"><label>Output phase</label>${phasesel('invpvph', s.inv.pv.ph)}</div>
-        <p class="note">Backup (EPS) mode: grid-forming on one phase. It throttles PV down to exactly what that phase consumes.</p>`,
+        <p class="note">Backup (EPS) mode: grid-forming on one phase. It throttles PV down to exactly what that phase consumes. As cluster master it sets the clock the other two inverters follow, 120° apart.</p>`,
       live: () => invLive('INV-1 PV', s.inv.pv.on ? f.pvAvail : 0, f.pv, s.inv.pv),
     };
 
@@ -333,7 +341,7 @@ LAMP INPUT ${s.sun.on ? C.LAMP_KW : 0} kW (emergency generator)`)
 
     P.door = {
       title: 'Door Drive Controller',
-      controls: () => (s.door.state === 'open' ? '' : `<p class="note">Sliding door, fail-secure. Drive: 3-phase induction motor — starting current loads <b>${C.DOOR_P} kW on EACH phase</b> for ${C.DOOR_T} s (real time — the ×360 time-lapse pauses while the motor starts). A missing phase makes the motor hum and stall ("single-phasing").</p>
+      controls: () => (s.door.state === 'open' ? '' : `<p class="note">Sliding door, fail-secure. Drive: 3-phase induction motor — starting current loads <b>≈ ${C.DOOR_P} kVA on EACH phase</b> for ${C.DOOR_T} s (inrush at a low power factor — the inverters' current limit is what counts) (real time — the ×360 time-lapse pauses while the motor starts). A missing phase makes the motor hum and stall ("single-phasing").</p>
         <div class="ctl"><button class="btn big" data-act="door:open" style="margin:0" ${s.door.state === 'opening' ? 'disabled' : ''}>OPEN DOOR</button></div>`),
       live: () => (s.door.state === 'open' ? lcd('STATUS  OPEN ✔') :
         lcd(PH.map((n, p) => `${n}  headroom ${fmt(f.head[p]).padStart(5)} kW  ${f.head[p] >= C.DOOR_P - 1e-6 ? '✔ ready' : '✘'}`).join('\n') +
