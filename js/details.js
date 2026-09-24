@@ -83,7 +83,26 @@ export function buildDetails({ scene, refs, M, col, box, cyl, sph, plane, texMat
   const bin = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.14, 0.44, 24, 1, true), std(0x3a3f45, { side: THREE.DoubleSide, roughness: 0.6 }));
   bin.position.set(1.0, 0.22, 4.65); scene.add(bin); tag(bin, 'bin', 'Waste-paper bin');
   cyl(0.14, 0.01, std(0x2a2e33), 1.0, 0.005, 4.65);
-  for (let i = 0; i < 4; i++) sph(0.045 + Math.random() * 0.02, std(0xe8e6de, { roughness: 1 }), 1.0 + (Math.random() - 0.5) * 0.12, 0.38 + i * 0.03, 4.65 + (Math.random() - 0.5) * 0.12);
+  // crumpled paper: faceted balls (jittered by position, so the facets stay closed) resting on a heap two-thirds up
+  const crumple = (r, seed) => {
+    const g = new THREE.IcosahedronGeometry(r, 1), p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+      const h = Math.sin(Math.round(x * 997) * 12.9898 + Math.round(y * 997) * 78.233 + Math.round(z * 997) * 37.719 + seed) * 43758.5453;
+      const k = 0.72 + (h - Math.floor(h)) * 0.42; p.setXYZ(i, x * k, y * k * 0.9, z * k);
+    }
+    g.computeVertexNormals(); return g;
+  };
+  const crumpled = std(0xd6d1c4, { roughness: 1, flatShading: true });
+  const heap = 0.27;                                                      // top of the paper already in the bin
+  plane(0.31, 0.31, new THREE.MeshStandardMaterial({ color: 0x9a968c, roughness: 1, map: canvasTex(64, 64, (ctx, w, h) => {
+    const g = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2); g.addColorStop(0, '#fff'); g.addColorStop(0.95, '#bbb'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+  }), alphaTest: 0.5 }), 1.0, heap - 0.02, 4.65, '+y');
+  for (const [dx, dz, r, s] of [[-0.05, 0.03, 0.05, 1], [0.05, -0.04, 0.045, 2], [0.03, 0.06, 0.04, 3], [-0.02, -0.06, 0.042, 4], [0.07, 0.03, 0.035, 5], [-0.07, -0.02, 0.038, 6], [0.0, 0.0, 0.05, 7]]) {
+    const m = new THREE.Mesh(crumple(r, s), crumpled); m.position.set(1.0 + dx, heap + r * (s === 7 ? 1.3 : 0.6), 4.65 + dz); m.rotation.set(s, s * 2, s * 3); scene.add(m);
+  }
+  const miss = new THREE.Mesh(crumple(0.045, 9), crumpled); miss.position.set(1.26, 0.04, 4.52); scene.add(miss);   // one that missed
   col(0.83, 1.17, 4.48, 4.82);
 
   // ---------------------------------------------------------------- spiral ventilation duct with diffusers and hangers
@@ -153,8 +172,25 @@ export function buildDetails({ scene, refs, M, col, box, cyl, sph, plane, texMat
   cyl(0.036, 0.005, std(0x2b1a10, { roughness: 0.1 }), 0, 0.075, 0, mug);
   const handle = new THREE.Mesh(new THREE.TorusGeometry(0.025, 0.007, 6, 12), std(0xe8e4d8)); handle.position.set(0.045, 0.045, 0); mug.add(handle);
   mug.position.set(-0.28, 0.79, -12.05); scene.add(mug);
-  const paper = std(0xf2f0ea, { roughness: 0.9 });
-  for (const [x, z, r] of [[0.25, -11.5, 0.2], [0.3, -11.55, -0.15], [-1.0, -12.15, 0.6]]) { const pp = plane(0.21, 0.297, paper, x, 0.792, z, '+y'); pp.rotation.z = r; tag(pp, 'papers', 'Papers'); }
+  // printed, slightly off-white sheets that curl a little — not glowing white quads
+  const sheet = (seed, ring) => canvasTex(256, 362, (ctx, w, h) => {
+    ctx.fillStyle = '#e4dfd2'; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#3b4a63'; ctx.fillRect(22, 22, 120, 10);
+    ctx.fillStyle = 'rgba(40,40,40,.55)';
+    for (let y = 52, k = seed; y < h - 30; y += 11, k++) { const len = 60 + ((k * 73) % 150); ctx.fillRect(22, y, Math.min(len, w - 44), 3); if (k % 7 === 0) y += 10; }
+    ctx.strokeStyle = 'rgba(40,40,40,.4)'; ctx.strokeRect(22, h - 120, w - 44, 70);
+    if (ring) { ctx.strokeStyle = 'rgba(110,70,30,.35)'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(w * 0.68, h * 0.3, 34, 0.3, Math.PI * 1.85); ctx.stroke(); }
+    weather(ctx, w, h, 0.5, seed + 40);
+  });
+  const curl = () => {                                                    // a sheet that lifts a few millimetres at its ends
+    const g = new THREE.PlaneGeometry(0.21, 0.297, 1, 8), p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) { const v = p.getY(i) / 0.1485; p.setZ(i, 0.004 * v * v); }
+    g.computeVertexNormals(); return g;
+  };
+  for (const [x, z, r, s] of [[0.25, -11.5, 0.2, 1], [0.3, -11.55, -0.15, 2], [-1.0, -12.15, 0.6, 3]]) {
+    const pp = new THREE.Mesh(curl(), std(0xffffff, { map: sheet(s, s === 2), roughness: 0.95 }));
+    pp.position.set(x, 0.7915 + s * 0.0004, z); pp.rotation.set(-Math.PI / 2, 0, r); scene.add(pp); tag(pp, 'papers', 'Papers');
+  }
   const ups = new THREE.Group();                                          // UPS under the desk — why the PC still runs
   box(0.2, 0.4, 0.45, M.dark, 0, 0.2, 0, ups);
   box(0.05, 0.02, 0.01, new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0x20ff60, emissiveIntensity: 2 }), 0, 0.33, 0.226, ups);

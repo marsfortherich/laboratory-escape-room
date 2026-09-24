@@ -169,3 +169,21 @@ The review ran on the build with the parallax window, the new cat and the re-rou
 | 🔬 Door "3 kW", inverter cluster, merit order, cooling | The door start is ≈ 3 kVA per phase (inrush at a low power factor). INV-1 is the cluster master. The merit order comes from frequency-shift power control. The rig is water-cooled. |
 | 🧪 Rain fell in rows; glands missed their cables; the cat clipped the label; cables grazed the desk; the bolt was clipped; the animation jumped every 10 min | Each rain lane has its own phase. Each gland is placed where its cable crosses the face. The tail and paw hang clear of the label and edge. The desk-edge points were lifted. The bolt's random walk is kept inside its canvas. The animation clock wraps hourly. |
 | 🧪 The sun beam lit the booth through walls | It is now the shadow-casting window light: walls and the frame block it. |
+
+## Owner feedback after v3
+
+| Feedback | Change |
+|---|---|
+| The cat has two tails | The front leg hanging over the edge read as a second tail. Both front legs are now tucked under the chin and end in pale, oval paws; only the tail hangs down. |
+| The trash in the bin floats | The bin is two-thirds full: faceted crumpled-paper balls rest on a paper heap, and one ball that missed lies on the floor. |
+| The paper in front of the control PC is very bright and unnatural | Off-white printed sheets (text, a table, a coffee ring) that curl slightly at their ends. The monitor's spill light is much softer and sits at the screen. |
+| The game could use performance optimizations | See below. |
+
+**Performance (same views, before → after):**
+- **The scene is drawn once per frame.** GTAO reads the depth of the main render and reconstructs normals from it, instead of drawing the whole scene again into a G-buffer. The highlight draws only the targeted object into a half-size mask (+6 draw calls) instead of three's OutlinePass, which re-rendered the scene twice whenever you aimed at something.
+- **Light pool:** the 13 lights (plus the shadow-casting window light) are fed into a fixed pool of 4 point + 4 spot lights, nearest and brightest first. Each pixel now shades 9 lights instead of 15. The pool never changes size, so shaders never recompile.
+- **Static merging:** set dressing that never moves and shares a material is merged. In the booth view the draw calls went from ≈ 450 to 250; the control room is at 116.
+- **Shadows:** only surfaces the window light can reach sample its shadow map, with plain PCF instead of soft PCF. Touch devices and *Low* skip it.
+- **Balanced quality adapts:** the resolution scales with the frame time (down to 55 %, then AO switches off), and MSAA drops to 2× on high-DPI screens.
+- The sync-scope screen redraws at 10 Hz, and only when you are near the tie panel.
+

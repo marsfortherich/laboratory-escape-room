@@ -12,6 +12,7 @@ import { TouchControls, isTouchDevice } from './touch.js';
 import { redraw, FONT } from './textures.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { PostFX } from './postfx.js';
+import { poolLights, mergeStatic, referencedObjects } from './perf.js';
 
 // ============================================================ boot
 const params = new URLSearchParams(location.search);
@@ -39,12 +40,13 @@ try {
   throw new Error('WebGL unavailable');
 }
 const pixelRatio = () => Math.min(devicePixelRatio || 1, { low: 1, auto: 1.5, high: 2 }[settings.quality] ?? 1.5);
+const perf = { ema: 16.7, t: 0, scale: 1, good: 0 };                      // resolution scale, driven by governor()
 renderer.setPixelRatio(pixelRatio());
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.15;
 // a single shadow-casting light (through the control-room window: lightning, then the evening sun); its map is drawn once
-renderer.shadowMap.enabled = !isTouchDevice(); renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.enabled = !isTouchDevice(); renderer.shadowMap.type = THREE.PCFShadowMap;
 $('app').appendChild(renderer.domElement);
 const canvas = renderer.domElement;
 canvas.setAttribute('aria-label', '3D view of the laboratory');
@@ -67,13 +69,21 @@ addEventListener('resize', () => {
 const { colliders, refs } = buildWorld(scene, P);
 // upload the large outdoor layers and compile every shader now, not at the first look out of the window
 for (const t of Object.values(refs.outside.night)) renderer.initTexture(t);
-scene.traverse((o) => { if (o.isMesh && !o.material.transparent && !o.material.isShaderMaterial) { o.castShadow = true; o.receiveShadow = true; } });
+// only surfaces the window light can reach (control room, corridor, front of the booth) sample its shadow map
+const bb = new THREE.Box3();
+scene.traverse((o) => {
+  if (!o.isMesh || o.material.transparent || o.material.isShaderMaterial) return;
+  bb.setFromObject(o); o.castShadow = true; o.receiveShadow = bb.min.z < -1 && bb.min.y < 3.3;
+});
+const lightPool = poolLights(scene, { points: 4, spots: 4 });        // 14 lights → 8 (+ the window light) per pixel
+mergeStatic(scene, referencedObjects(refs));                            // fewer draw calls for the static set dressing
 refs.cat.eyeOpen.visible = true;                          // compile the cat's open eye too, not on the 4th pet
 renderer.compile(scene, camera);
 refs.cat.eyeOpen.visible = false;
 // the last shot of the game: the outdoor view rendered full-screen from a camera that has stepped out onto the terrace
 const outroView = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), refs.outside.material(refs.doorFrame, { trees: false }));   // (a tree would stand right beside the camera)
 Object.assign(outroView.material, { depthTest: false, depthWrite: false });
+outroView.raycast = () => {};                            // invisible most of the time, but it sits right in front of the camera
 outroView.renderOrder = 1000; outroView.frustumCulled = false; outroView.position.z = -0.2; outroView.visible = false;
 camera.add(outroView); scene.add(camera);
 const fadeEl = document.createElement('div'); fadeEl.id = 'fade'; document.body.appendChild(fadeEl);
@@ -108,7 +118,8 @@ function applySettings() {
   sound.setVolume(settings.volume);
   document.documentElement.style.setProperty('--ui', settings.uiScale);
   setPalette(settings.palette);
-  renderer.setPixelRatio(pixelRatio());
+  if (settings.quality !== 'auto') perf.scale = 1;
+  renderer.setPixelRatio(pixelRatio() * perf.scale);
   if (postQuality !== settings.quality) { postQuality = settings.quality; postfx.configure(settings.quality, { touch: isTouchDevice() }); }
   postfx.setSize(innerWidth, innerHeight);
   sim.version++;
@@ -839,7 +850,7 @@ function updateVisuals(dt) {
   // one light through the window: cold lightning, or the low warm evening sun (the frame throws its shadow)
   const sunK = eve * 5, flK = flash * 3.5;
   refs.windowLight.intensity = sunK + flK;
-  if (sunK + flK > 0) refs.windowLight.color.setRGB((1.0 * sunK + 0.75 * flK) / (sunK + flK), (0.68 * sunK + 0.82 * flK) / (sunK + flK), (0.4 * sunK + 1.0 * flK) / (sunK + flK));
+  if (sunK + flK > 0) refs.windowLight.color.setRGB((1.0 * sunK + 0.75 * flK) / (sunK + flK), (0.6 * sunK + 0.82 * flK) / (sunK + flK), (0.3 * sunK + 1.0 * flK) / (sunK + flK));
   refs.skyLight.intensity = eve * 7;
   if (G.syncT > 3 && !G.shadowRedone) { G.shadowRedone = true; refs.windowLight.shadow.needsUpdate = true; }   // exit door has moved
   // the cat: slow sleeping breaths, the hanging tail swaying, now and then an ear flick; lifts his head to open an eye
@@ -910,7 +921,7 @@ function updateVisuals(dt) {
   refs.syncLamps.forEach((m, i) => { m.material.emissive.set('#ffb060'); m.material.emissiveIntensity = 0.05 + lamps[i] * 3; });
   refs.syncHandle.rotation.x = sync.closed ? 0.6 : 0;
   syncTexTimer -= dt;
-  if (player.z < -5 && syncTexTimer <= 0) { syncTexTimer = 0.05; redraw(refs.syncTex, (ctx, w, h) => drawSyncScope(ctx, w, h, sync, { compact: true })); }
+  if (player.z < -5 && syncTexTimer <= 0 && Math.hypot(player.x - 4.6, player.z + 10.6) < 7) { syncTexTimer = 0.1; redraw(refs.syncTex, (ctx, w, h) => drawSyncScope(ctx, w, h, sync, { compact: true })); }
 
   screenTimer -= dt;
   if (screenTimer <= 0) { screenTimer = 0.25; drawScreens(); }
@@ -1171,10 +1182,28 @@ function win() {
   };
 }
 
+// ============================================================ frame-time governor (Balanced quality)
+// Keeps ~60 fps on weaker GPUs: renders at a lower resolution while frames are slow, climbs back when there is headroom,
+// and as a last resort drops the ambient occlusion for the session.
+function governor(rawDt) {
+  if (settings.quality !== 'auto' || document.hidden || rawDt > 0.25 || G.mode === 'grid' || G.mode === 'start') return;
+  perf.ema += (rawDt * 1000 - perf.ema) * 0.06;
+  if ((perf.t += rawDt) < 1) return;
+  perf.t = 0;
+  const prev = perf.scale;
+  if (perf.ema > 20.5) {
+    if (perf.scale > 0.55) perf.scale = Math.max(0.55, perf.scale - 0.15); else postfx.aoOff = true;
+    perf.good = 0;
+  } else if (perf.ema < 17.8) { if (++perf.good >= 4 && perf.scale < 1) { perf.scale = Math.min(1, perf.scale + 0.1); perf.good = 0; } }
+  else perf.good = 0;
+  if (perf.scale !== prev) { renderer.setPixelRatio(pixelRatio() * perf.scale); postfx.setSize(innerWidth, innerHeight); }
+}
+
 // ============================================================ main loop
 let last = performance.now(), hudTimer = 0, saveTimer = 5, doorWasOpen = sim.s.door.state === 'open';
 function loop(now) {
-  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  const rawDt = (now - last) / 1000, dt = Math.min(0.1, rawDt); last = now;
+  governor(rawDt);
   const running = ['play', 'panel', 'terminal', 'grid', 'hint', 'journal'].includes(G.mode);   // not before "Click to play", not in the menu
   if (running) {
     sim.tick(dt);
@@ -1215,6 +1244,7 @@ function loop(now) {
   if (saveTimer <= 0) { saveTimer = 5; save(); }
 
   // AO off behind overlays and in the last shot (its depth buffer still holds the building); the console covers everything
+  lightPool.update(camera.position);
   if (G.mode !== 'grid') postfx.render(dt, outroView.visible || ['panel', 'terminal', 'journal', 'hint', 'menu'].includes(G.mode));
   requestAnimationFrame(loop);
 }
@@ -1246,5 +1276,5 @@ if (skip) {
 else if (params.get('autostart')) { store.del(SAVE_KEY); showResumeGate(); startBriefing(); if (seed) toast(`Daily room ${seed}: every code is different today.`); }
 else showStart();
 
-window.__game = { player, sim, G, P, interact, terminal, grid, sync, refs, openPanel, setStage, win, save, postfx, renderer };
+window.__game = { player, sim, G, P, interact, terminal, grid, sync, refs, openPanel, setStage, win, save, postfx, renderer, perf, lightPool };
 $('loading')?.remove();

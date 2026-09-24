@@ -489,7 +489,7 @@ export function buildWorld(scene, P) {
   box(0.6, 0.03, 0.2, std(0x1b1f24), 0, 0.8, -11.7, pc);
   box(0.45, 0.45, 0.2, M.dark, 0.85, 1.02, -12.1, pc);
   scene.add(pc); tag(pc, 'pc', 'Control PC');
-  const glow = new THREE.PointLight(0x5dff8f, 1.8, 0, 2); glow.position.set(0, 1.3, -11.7); scene.add(glow);
+  const glow = new THREE.PointLight(0x5dff8f, 0.55, 3, 2); glow.position.set(0, 1.22, -12.0); scene.add(glow);   // the monitor's spill (soft)
   // chair (with collider)
   box(0.5, 0.08, 0.5, std(0x1b1f24), 0, 0.48, -11.0);
   box(0.5, 0.6, 0.06, std(0x1b1f24), 0, 0.82, -10.73);

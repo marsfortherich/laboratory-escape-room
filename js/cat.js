@@ -137,10 +137,16 @@ export function buildCat({ M }) {
   withFur(sweep(spine, profile([[0, 0.004], [0.025, 0.05], [0.07, 0.072], [0.15, 0.078], [0.4, 0.07], [0.62, 0.068], [0.78, 0.06], [0.9, 0.042], [1, 0.035]]), { flatten: 0.74, floor: 0.002, segs: 72 }),
     coat, [2, 1.8], body);
 
-  // legs: one tucked under the chin, one hanging over the front edge
-  const leg = (pts, r0) => withFur(sweep(pts, profile([[0, r0], [0.62, 0.015], [0.84, 0.0195], [1, 0.005]]), { segs: 24, ring: 10, floor: pts[pts.length - 1][1] > 0 ? 0.002 : -1 }), limbCoat, [0.6, 0.5], body, 0.003, 2);
-  leg([[-0.04, 0.03, 0.055], [-0.08, 0.02, 0.02], [-0.1, 0.016, -0.02], [-0.108, 0.015, -0.04]], 0.021);
-  leg([[-0.045, 0.032, 0.11], [-0.085, 0.026, 0.14], [-0.114, 0.022, 0.155], [-0.136, -0.012, 0.163], [-0.142, -0.05, 0.166]], 0.021);   // dangling, clear of the front edge
+  // front legs: both tucked under the chin, ending in pale paws (a paw hanging over the edge read as a second tail)
+  const pawMat = new THREE.MeshPhysicalMaterial({ color: 0xe9d3b0, roughness: 0.9, sheen: 1, sheenRoughness: 0.5, sheenColor: new THREE.Color(0.4, 0.34, 0.28) });
+  const leg = (pts, r0) => {
+    withFur(sweep(pts, profile([[0, r0], [0.7, 0.0145], [1, 0.012]]), { segs: 20, ring: 10, floor: 0.002 }), limbCoat, [0.6, 0.5], body, 0.003, 2);
+    const [a, b] = [pts[pts.length - 2], pts[pts.length - 1]].map((p) => new THREE.Vector3(...p));
+    const paw = new THREE.Mesh(new THREE.SphereGeometry(0.0165, 14, 10), pawMat);
+    paw.position.copy(b); paw.lookAt(b.clone().sub(a).add(b)); paw.scale.set(1.05, 0.62, 1.3); body.add(paw);   // oval, flat, pointing forward
+  };
+  leg([[-0.04, 0.03, 0.055], [-0.078, 0.021, 0.022], [-0.094, 0.016, -0.012], [-0.099, 0.014, -0.034]], 0.02);
+  leg([[-0.042, 0.03, 0.098], [-0.08, 0.021, 0.07], [-0.097, 0.016, 0.034], [-0.101, 0.014, 0.012]], 0.02);
 
   // tail: along the front edge, then over it (the hanging end sways; see main.js)
   const tailR = profile([[0, 0.018], [0.5, 0.0155], [1, 0.0145]]);

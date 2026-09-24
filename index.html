@@ -9,7 +9,7 @@
   <meta property="og:title" content="Power Lab Escape">
   <meta property="og:description" content="Power up a 3-phase island grid, hack the control PC, out-trade the market and synchronise with the grid to escape.">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="css/style.css?v=212abfb2d4">
+  <link rel="stylesheet" href="css/style.css?v=8405e2f682">
   <!-- Only used in dev mode (index.html?dev — needs `npm install` and a local server): raw ES modules. -->
   <script type="importmap">
   { "imports": { "three": "./node_modules/three/build/three.module.js", "three/addons/": "./node_modules/three/examples/jsm/" } }
@@ -106,7 +106,7 @@
     (function () {
       var s = document.createElement('script');
       if (/[?&]dev(=|&|$)/.test(location.search)) { s.type = 'module'; s.src = 'js/main.js'; }
-      else s.src = 'dist/game.js?v=212abfb2d4';
+      else s.src = 'dist/game.js?v=8405e2f682';
       s.onerror = function () { document.body.insertAdjacentHTML('beforeend', '<div class="overlay"><div class="card">Could not load ' + s.src + '. Run <code>npm run build</code>.</div></div>'); };
       document.body.appendChild(s);
     })();

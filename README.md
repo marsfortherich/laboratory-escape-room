@@ -27,6 +27,7 @@ A **Classic room** follows the walkthrough below. A **Daily room** changes every
 | Hint / Journal | `H` / `J` | 💡 / 📓 |
 | Menu & settings | `Esc` | ☰ |
 
+- **Performance:** on *Balanced* the render resolution follows the frame time (down to 55 %, and without ambient occlusion as a last resort) to hold about 60 fps; *High* keeps full resolution, *Low* skips post-processing.
 - **Settings:** look sensitivity, invert Y, FOV, volume, UI scale, brightness, reduced motion, **reduce flashing** (soft single-pulse lightning, no fluorescent flicker), a colour-blind-safe palette and render quality. Reduced motion and reduce flashing follow the operating system's *reduce motion* preference by default.
 - **Saving:** progress is saved automatically in your browser, with one slot per room (classic and today's daily). Use **Continue** on the title screen.
 
@@ -80,7 +81,8 @@ Always run `npm run build` before committing, so that double-click and branch de
 | `js/materials.js` | procedural tileable surfaces (grimy plaster, worn floor tiles, drop ceiling, brushed metal, paint) and label weathering |
 | `js/cologne.js` | the Cologne skyline as depth layers (far city with Colonius and Kranhäuser, Altstadt with Groß St. Martin, the Dom and a river cruiser, Hohenzollern Bridge and KölnTriangle) in three states: storm blackout, storm with the city re-energised, and the evening after the storm with the sun setting behind the old town; lightning bolts, rain on the glass |
 | `js/outside.js` | the view through the window and the exit doorway: a shader that traces each pixel's line of sight into the layers, the reflecting Rhine, a wet terrace with railing, street lamps and trees, and rain at several depths, so the city has real parallax; cross-fades between the three states; the same shader renders the last shot out on the terrace |
-| `js/postfx.js` | post-processing: ambient occlusion, bloom, tone mapping, film grain and vignette (off on *Low* quality) |
+| `js/postfx.js` | post-processing: MSAA, ambient occlusion (from the scene's own depth), the amber highlight, bloom, tone mapping, film grain and vignette (off on *Low* quality) |
+| `js/perf.js` | rendering budget: a fixed pool of 8 real lights fed from the 13 in the scene (nearest / brightest first), and merging of static set dressing into fewer draw calls |
 | `js/labsim.js` | Act 1 physics: per-phase dispatch, energy-conserving storage, trips, the door drive; device panels and tiered hints |
 | `js/terminal.js` | Act 2 shell: virtual filesystem, users, mail, `scada diag`, `gridctl` |
 | `js/gridgame.js` | Act 3: weather/price scenarios, hourly dispatch model, scoring, DP benchmark, dashboard |
