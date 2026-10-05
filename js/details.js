@@ -62,7 +62,7 @@ export function buildDetails({ scene, refs, M, col, box, cyl, sph, plane, texMat
   cyl(0.03, 0.08, M.dark, 0, 0.71, 0, ext); box(0.12, 0.02, 0.03, M.dark, 0.03, 0.76, 0, ext);
   const hose = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.01, 6, 16, PI * 1.2), M.dark); hose.position.set(0.07, 0.55, 0.05); hose.rotation.z = -PI / 2; ext.add(hose);
   box(0.2, 0.06, 0.04, M.metal, 0, 0.55, -0.09, ext);
-  ext.position.set(-2.05, 0, -4.86); scene.add(ext); col(-2.15, -1.95, -5.0, -4.76);
+  ext.position.set(-2.05, 0, -4.86); scene.add(ext); refs.props.extinguisher = ext; col(-2.15, -1.95, -5.0, -4.76);
   plane(0.18, 0.24, texMat(labelTex([{ t: '🧯', font: `90px ${FONT.sans}` }, { t: 'FIRE', font: `bold 34px ${FONT.sans}` }], { w: 192, h: 256, bg: '#c0141a', fg: '#fff' })), -2.05, 1.05, -4.99, '+z');
   plane(0.3, 0.3, texMat(labelTex([{ t: 'H₂', font: `bold 70px ${FONT.sans}` }, { t: 'NO FLAMES', font: `bold 30px ${FONT.sans}` }], { w: 256, h: 256, bg: '#ffd200', fg: '#111', border: '#111' })), -3.9, 2.2, -4.99, '+z');
   plane(0.26, 0.26, texMat(labelTex([{ t: '⛑', font: `80px ${FONT.sans}` }, { t: 'PPE', font: `bold 36px ${FONT.sans}` }], { w: 256, h: 256, bg: '#1b5fa8', fg: '#fff' })), 5.99, 1.6, -4.4, '-x');
@@ -171,7 +171,7 @@ export function buildDetails({ scene, refs, M, col, box, cyl, sph, plane, texMat
   cyl(0.04, 0.09, std(0xe8e4d8, { roughness: 0.3 }), 0, 0.045, 0, mug);
   cyl(0.036, 0.005, std(0x2b1a10, { roughness: 0.1 }), 0, 0.075, 0, mug);
   const handle = new THREE.Mesh(new THREE.TorusGeometry(0.025, 0.007, 6, 12), std(0xe8e4d8)); handle.position.set(0.045, 0.045, 0); mug.add(handle);
-  mug.position.set(-0.28, 0.79, -12.05); scene.add(mug);
+  mug.position.set(-0.28, 0.792, -12.05); mug.rotation.y = 0.6; scene.add(mug); refs.props.mug = mug;
   // printed, slightly off-white sheets that curl a little — not glowing white quads
   const sheet = (seed, ring) => canvasTex(256, 362, (ctx, w, h) => {
     ctx.fillStyle = '#e4dfd2'; ctx.fillRect(0, 0, w, h);
@@ -202,7 +202,7 @@ export function buildDetails({ scene, refs, M, col, box, cyl, sph, plane, texMat
     const leaf = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.45, 5), std(i % 3 ? 0x6b6a2c : 0x8a7a3a, { roughness: 0.9 }));
     const a = (i / 9) * PI * 2; leaf.position.set(Math.cos(a) * 0.05, 0.5, Math.sin(a) * 0.05); leaf.rotation.set(Math.sin(a) * 0.5, 0, Math.cos(a) * 0.5 + (i % 2) * 0.3); plant.add(leaf);
   }
-  plant.position.set(4.35, 0, -5.75); scene.add(plant); col(4.17, 4.53, -5.93, -5.57);
+  plant.position.set(4.35, 0, -5.75); scene.add(plant); refs.props.plant = plant; col(4.17, 4.53, -5.93, -5.57);
   const cork = canvasTex(384, 256, (ctx, w, h) => {                       // cork board with pinned notes
     ctx.fillStyle = '#b48a5a'; ctx.fillRect(0, 0, w, h);
     for (let i = 0; i < 2500; i++) { ctx.fillStyle = `rgba(90,60,30,${Math.random() * 0.25})`; ctx.fillRect(Math.random() * w, Math.random() * h, 2, 2); }

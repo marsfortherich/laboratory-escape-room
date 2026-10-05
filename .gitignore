@@ -1,1 +1,5 @@
 node_modules/
+assets/tex/
+assets/preview/
+handout/Power-Lab-Escape-Teacher-Guide.pdf
+tools/teacher.py

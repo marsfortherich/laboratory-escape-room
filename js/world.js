@@ -490,10 +490,13 @@ export function buildWorld(scene, P) {
   box(0.45, 0.45, 0.2, M.dark, 0.85, 1.02, -12.1, pc);
   scene.add(pc); tag(pc, 'pc', 'Control PC');
   const glow = new THREE.PointLight(0x5dff8f, 0.55, 3, 2); glow.position.set(0, 1.22, -12.0); scene.add(glow);   // the monitor's spill (soft)
-  // chair (with collider)
-  box(0.5, 0.08, 0.5, std(0x1b1f24), 0, 0.48, -11.0);
-  box(0.5, 0.6, 0.06, std(0x1b1f24), 0, 0.82, -10.73);
-  cyl(0.04, 0.44, M.metal, 0, 0.22, -11.0);
+  // chair (with collider): a quick stand-in until the baked model from props.js replaces it
+  refs.props = {};
+  const chair = refs.props.chair = new THREE.Group();
+  box(0.5, 0.08, 0.5, std(0x1b1f24), 0, 0.48, 0, chair);
+  box(0.5, 0.6, 0.06, std(0x1b1f24), 0, 0.82, 0.27, chair);
+  cyl(0.04, 0.44, M.metal, 0, 0.22, 0, chair);
+  chair.position.set(0, 0, -11.0); chair.rotation.y = Math.PI; scene.add(chair);   // the model's backrest is on -z
   col(-0.28, 0.28, -11.28, -10.7);
   recorder('rec4', 0.55, 0.81, -11.55, -0.3);
   // FW-BOARD logic board on the desk

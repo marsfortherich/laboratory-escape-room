@@ -13,6 +13,7 @@ import { redraw, FONT } from './textures.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { PostFX } from './postfx.js';
 import { poolLights, mergeStatic, referencedObjects } from './perf.js';
+import { loadProps } from './props.js';
 
 // ============================================================ boot
 const params = new URLSearchParams(location.search);
@@ -61,7 +62,8 @@ scene.environmentIntensity = 0.08;
 const postfx = new PostFX(renderer, scene, camera);
 let postQuality = null;
 addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  if (!innerWidth || !innerHeight) return;                          // minimised / hidden: keep the last good size
+  camera.aspect = innerWidth / innerHeight; camera.fov = viewFov(); camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   postfx.setSize(innerWidth, innerHeight);
 });
@@ -77,6 +79,9 @@ scene.traverse((o) => {
 });
 const lightPool = poolLights(scene, { points: 4, spots: 4 });        // 14 lights → 8 (+ the window light) per pixel
 mergeStatic(scene, referencedObjects(refs));                            // fewer draw calls for the static set dressing
+// baked Blender props replace their stand-ins as soon as they are parsed (they cast into the window light's shadow map)
+for (const g of Object.values(refs.props)) g.userData.receiveShadow = true;
+loadProps(refs.props, () => { refs.windowLight.shadow.needsUpdate = true; });
 refs.cat.eyeOpen.visible = true;                          // compile the cat's open eye too, not on the 4th pet
 renderer.compile(scene, camera);
 refs.cat.eyeOpen.visible = false;
@@ -110,6 +115,7 @@ const ui = {
 /** vertical FOV from the setting — widened in portrait so phones don't get tunnel vision (≥ 62° horizontal) */
 function viewFov() {
   const a = camera.aspect;
+  if (!(a > 0 && Number.isFinite(a))) return settings.fov;          // window not laid out yet (0 × 0): never feed NaN into the camera
   return a >= 1 ? settings.fov : Math.max(settings.fov, Math.min(100, 2 * Math.atan(Math.tan((62 * Math.PI) / 360) / a) * 180 / Math.PI));
 }
 function applySettings() {
@@ -710,6 +716,7 @@ function move(dt) {
     if (player.stepAcc > (sprint ? 0.8 : 0.65)) { player.stepAcc = 0; sound.step(); }
   }
   const fovT = viewFov() + (sprint && sp > 3.5 && !settings.reducedMotion ? 6 : 0);
+  if (!Number.isFinite(camera.fov)) camera.fov = fovT;
   if (Math.abs(camera.fov - fovT) > 0.05) { camera.fov += (fovT - camera.fov) * Math.min(1, dt * 6); camera.updateProjectionMatrix(); }
 }
 
@@ -855,7 +862,7 @@ function updateVisuals(dt) {
   if (G.syncT > 3 && !G.shadowRedone) { G.shadowRedone = true; refs.windowLight.shadow.needsUpdate = true; }   // exit door has moved
   // the cat: slow sleeping breaths, the hanging tail swaying, now and then an ear flick; lifts his head to open an eye
   const eyeOpen = (G.catEye = Math.max(0, (G.catEye || 0) - dt)) > 0;
-  refs.cat.eyeOpen.visible = eyeOpen; refs.cat.lids.forEach((l) => { l.visible = !eyeOpen; });
+  refs.cat.eyeOpen.visible = eyeOpen; refs.cat.lids[1].visible = !eyeOpen;   // only the opened eye (right, +x) loses its lid; the other stays shut
   G.catLift = ease(G.catLift || 0, eyeOpen ? 1 : 0, 4); refs.cat.lift(G.catLift);
   // dust motes: only where a light beam shows them (sun simulator, evening sun through the window)
   for (const [d, vis] of [[refs.dustSun, s.sun.on ? 0.7 : 0], [refs.dustBeam, eve * 0.8]]) {
